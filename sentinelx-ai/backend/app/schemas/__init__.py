@@ -1,6 +1,6 @@
 """
 SentinelX AI – Schemas Package
-Exposes Role, User, AssetGroup, Asset, and Auth Pydantic v2 schemas.
+Exposes Role, User, AssetGroup, Asset, Auth, and Threat/Alert/IOC Pydantic v2 schemas.
 """
 
 from app.schemas.role_schema import RoleBase, RoleCreate, RoleUpdate, RoleResponse
@@ -20,6 +20,36 @@ from app.schemas.auth_schema import (
     TokenResponse,
     RefreshTokenRequest,
     PasswordResetRequest,
+)
+from app.schemas.threat_schema import (
+    ThreatCreate,
+    ThreatUpdate,
+    ThreatResponse,
+    ThreatSummary,
+    ThreatListResponse,
+    ThreatStatsResponse,
+    AlertCreate,
+    AlertUpdate,
+    AlertResponse,
+    IOCCreate,
+    IOCUpdate,
+    IOCResponse,
+)
+from app.schemas.incident_schema import (
+    IncidentCreate,
+    IncidentUpdate,
+    IncidentResponse,
+    IncidentSummary,
+    IncidentListResponse,
+    IncidentStatsResponse,
+    IncidentAssignRequest,
+    IncidentStatusUpdateRequest,
+    IncidentTimelineCreate,
+    IncidentTimelineResponse,
+    IncidentNoteCreate,
+    IncidentNoteResponse,
+    IncidentEvidenceCreate,
+    IncidentEvidenceResponse,
 )
 
 __all__ = [
@@ -43,4 +73,30 @@ __all__ = [
     "TokenResponse",
     "RefreshTokenRequest",
     "PasswordResetRequest",
+    "ThreatCreate",
+    "ThreatUpdate",
+    "ThreatResponse",
+    "ThreatSummary",
+    "ThreatListResponse",
+    "ThreatStatsResponse",
+    "AlertCreate",
+    "AlertUpdate",
+    "AlertResponse",
+    "IOCCreate",
+    "IOCUpdate",
+    "IOCResponse",
+    "IncidentCreate",
+    "IncidentUpdate",
+    "IncidentResponse",
+    "IncidentSummary",
+    "IncidentListResponse",
+    "IncidentStatsResponse",
+    "IncidentAssignRequest",
+    "IncidentStatusUpdateRequest",
+    "IncidentTimelineCreate",
+    "IncidentTimelineResponse",
+    "IncidentNoteCreate",
+    "IncidentNoteResponse",
+    "IncidentEvidenceCreate",
+    "IncidentEvidenceResponse",
 ]

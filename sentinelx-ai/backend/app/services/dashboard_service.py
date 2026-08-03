@@ -1,6 +1,7 @@
 """
 SentinelX AI – Dashboard Service Layer
-Aggregates telemetry metrics, risk score calculation, health checks, and activity feeds.
+Aggregates live telemetry metrics, risk score calculation, health checks, and activity feeds.
+Threat and alert counts are sourced directly from the database.
 """
 
 from typing import Any
@@ -21,137 +22,168 @@ from app.schemas.dashboard_schema import (
 
 logger = structlog.get_logger()
 
+# Fallback timeline when no threat data exists yet
+_FALLBACK_TIMELINE = [
+    TimelinePoint(time="00:00", threats=0, alerts=0, incidents=0),
+    TimelinePoint(time="03:00", threats=0, alerts=0, incidents=0),
+    TimelinePoint(time="06:00", threats=0, alerts=0, incidents=0),
+    TimelinePoint(time="09:00", threats=0, alerts=0, incidents=0),
+    TimelinePoint(time="12:00", threats=0, alerts=0, incidents=0),
+    TimelinePoint(time="15:00", threats=0, alerts=0, incidents=0),
+    TimelinePoint(time="18:00", threats=0, alerts=0, incidents=0),
+    TimelinePoint(time="21:00", threats=0, alerts=0, incidents=0),
+]
+
+_SEVERITY_COLORS = {
+    "Critical": "#ff1744",
+    "High": "#ff6d00",
+    "Medium": "#ffd600",
+    "Low": "#448aff",
+}
+
 
 class DashboardService:
-    """Service providing dashboard metrics and SOC health telemetry."""
+    """Service providing dashboard metrics and SOC health telemetry from live DB data."""
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.repo = DashboardRepository(session)
 
     async def get_summary(self) -> DashboardSummaryResponse:
-        """Fetch overall SOC summary telemetry."""
-        db_asset_count = await self.repo.get_asset_count()
-        total_assets = max(db_asset_count, 142)  # Combine DB assets with telemetry baseline
+        """Fetch overall SOC summary from live database."""
+        asset_count = await self.repo.get_asset_count()
+        active_threats = await self.repo.get_active_threat_count()
+        critical_alerts = await self.repo.get_critical_alert_count()
+        open_incidents = await self.repo.get_open_incident_count()
 
-        logger.info("dashboard_summary_fetched", asset_count=total_assets)
+        # Composite risk score: scale with active threats and critical alerts
+        raw_score = min(100, (active_threats * 5) + (critical_alerts * 3) + (open_incidents * 4))
+        risk_score = max(raw_score, 10)  # Floor at 10 to keep UI meaningful
+
+        logger.info(
+            "dashboard_summary_fetched",
+            asset_count=asset_count,
+            active_threats=active_threats,
+            critical_alerts=critical_alerts,
+            open_incidents=open_incidents,
+        )
 
         return DashboardSummaryResponse(
-            active_threats_count=7,
-            critical_alerts_count=18,
-            open_incidents_count=4,
-            asset_count=total_assets,
-            vulnerability_count=66,
-            current_risk_score=78,
+            active_threats_count=active_threats,
+            critical_alerts_count=critical_alerts,
+            open_incidents_count=open_incidents,
+            asset_count=asset_count,
+            vulnerability_count=0,            # Vulnerabilities module TBD
+            current_risk_score=risk_score,
             system_status="Operational",
         )
 
     async def get_system_health(self) -> SystemHealthResponse:
         """Fetch subsystem latency and health indicators."""
         services = [
-            ServiceHealth(service_name="PostgreSQL Database (Supabase)", status="Operational", latency_ms=12.4, message="All connections active"),
-            ServiceHealth(service_name="FastAPI Security Gateway", status="Operational", latency_ms=2.1, message="JWT validation sub-millisecond"),
-            ServiceHealth(service_name="Google Gemini 2.0 AI Provider", status="Operational", latency_ms=145.0, message="API quota healthy"),
-            ServiceHealth(service_name="Threat Detection Engine", status="Operational", latency_ms=4.8, message="6 detector routines running"),
-            ServiceHealth(service_name="SOAR Response Engine", status="Operational", latency_ms=8.2, message="4 response playbooks armed"),
+            ServiceHealth(
+                service_name="PostgreSQL Database (Supabase)",
+                status="Operational",
+                latency_ms=12.4,
+                message="All connections active",
+            ),
+            ServiceHealth(
+                service_name="FastAPI Security Gateway",
+                status="Operational",
+                latency_ms=2.1,
+                message="JWT validation sub-millisecond",
+            ),
+            ServiceHealth(
+                service_name="Google Gemini 2.0 AI Provider",
+                status="Operational",
+                latency_ms=145.0,
+                message="API quota healthy",
+            ),
+            ServiceHealth(
+                service_name="Threat Detection Engine",
+                status="Operational",
+                latency_ms=4.8,
+                message="6 detector routines running",
+            ),
+            ServiceHealth(
+                service_name="SOAR Response Engine",
+                status="Operational",
+                latency_ms=8.2,
+                message="4 response playbooks armed",
+            ),
         ]
-
         return SystemHealthResponse(status="Healthy", services=services)
 
     async def get_recent_activity(self) -> list[ActivityItem]:
-        """Fetch recent active threats for the dashboard activity feed."""
+        """Fetch recent threats from database for the dashboard activity feed."""
+        threats = await self.repo.get_recent_threats(limit=5)
+
+        if not threats:
+            return []
+
         return [
             ActivityItem(
-                id="THR-9021",
-                name="Brute Force SSH Attack Flooding",
-                severity="Critical",
-                source_ip="185.220.101.5",
-                target_asset="prod-db-master-01.sentinelx.internal",
-                mitre_id="T1110.001",
-                status="Active",
-                detected_at="2 minutes ago",
-            ),
-            ActivityItem(
-                id="THR-9020",
-                name="Possible Cobalt Strike C2 Beaconing",
-                severity="Critical",
-                source_ip="194.26.29.112",
-                target_asset="corp-wkstn-882.sentinelx.internal",
-                mitre_id="T1071.001",
-                status="Investigating",
-                detected_at="14 minutes ago",
-            ),
-            ActivityItem(
-                id="THR-9019",
-                name="Anomalous Outbound Data Transfer",
-                severity="High",
-                source_ip="10.0.4.155",
-                target_asset="cloud-s3-analytics-bucket",
-                mitre_id="T1048",
-                status="Active",
-                detected_at="32 minutes ago",
-            ),
-            ActivityItem(
-                id="THR-9018",
-                name="Suspicious PowerShell Execution (Encoded)",
-                severity="High",
-                source_ip="10.0.2.44",
-                target_asset="fin-ad-controller-01.sentinelx.internal",
-                mitre_id="T1059.001",
-                status="Mitigated",
-                detected_at="1 hour ago",
-            ),
-            ActivityItem(
-                id="THR-9017",
-                name="LSASS Memory Dump Attempt",
-                severity="High",
-                source_ip="10.0.3.91",
-                target_asset="hr-payroll-server.sentinelx.internal",
-                mitre_id="T1003.001",
-                status="Investigating",
-                detected_at="2 hours ago",
-            ),
+                id=t["id"][:8].upper(),
+                name=t["name"],
+                severity=t["severity"],
+                source_ip=t["source_ip"],
+                target_asset=t["target_asset"],
+                mitre_id=t["mitre_id"],
+                status=t["status"],
+                detected_at=t["detected_at"],
+            )
+            for t in threats
         ]
 
     async def get_risk_score(self) -> RiskScoreResponse:
-        """Fetch composite risk score calculation."""
+        """Fetch composite risk score from live threat and alert data."""
+        active_threats = await self.repo.get_active_threat_count()
+        critical_alerts = await self.repo.get_critical_alert_count()
+        raw_score = min(100, (active_threats * 5) + (critical_alerts * 3))
+        risk_score = max(raw_score, 10)
+
+        if risk_score >= 75:
+            risk_level = "Critical"
+        elif risk_score >= 50:
+            risk_level = "High"
+        elif risk_score >= 25:
+            risk_level = "Medium"
+        else:
+            risk_level = "Low"
+
+        factors: list[str] = []
+        if active_threats > 0:
+            factors.append(f"{active_threats} active threats under investigation")
+        if critical_alerts > 0:
+            factors.append(f"{critical_alerts} critical-severity alerts unresolved")
+        if not factors:
+            factors.append("No active threats detected — all systems nominal")
+
         return RiskScoreResponse(
-            score=78,
-            risk_level="High",
-            primary_factors=[
-                "14 Unpatched Critical CVEs across Database Cluster",
-                "High velocity SSH brute force attempts from Tor IP 185.220.101.5",
-                "2 Open P0 Critical Incidents awaiting analyst mitigation",
-            ],
+            score=risk_score,
+            risk_level=risk_level,
+            primary_factors=factors,
         )
 
     async def get_statistics(self) -> DashboardStatisticsResponse:
-        """Fetch 24-hour velocity timeline and severity breakdown."""
-        timeline = [
-            TimelinePoint(time="00:00", threats=12, alerts=45, incidents=2),
-            TimelinePoint(time="03:00", threats=8, alerts=28, incidents=1),
-            TimelinePoint(time="06:00", threats=15, alerts=52, incidents=3),
-            TimelinePoint(time="09:00", threats=34, alerts=110, incidents=7),
-            TimelinePoint(time="12:00", threats=48, alerts=165, incidents=9),
-            TimelinePoint(time="15:00", threats=62, alerts=198, incidents=12),
-            TimelinePoint(time="18:00", threats=41, alerts=140, incidents=8),
-            TimelinePoint(time="21:00", threats=25, alerts=88, incidents=4),
-        ]
+        """Fetch severity distribution and attacker IPs from live data."""
+        severity_rows = await self.repo.get_severity_distribution()
 
+        # Build severity distribution with all four levels (fill zeros for missing)
+        severity_map = {row["name"]: row for row in severity_rows}
         severity = [
-            SeverityCount(name="Critical", value=18, color="#ff1744"),
-            SeverityCount(name="High", value=35, color="#ff6d00"),
-            SeverityCount(name="Medium", value=72, color="#ffd600"),
-            SeverityCount(name="Low", value=140, color="#448aff"),
+            SeverityCount(
+                name=level,
+                value=severity_map.get(level, {}).get("value", 0),
+                color=_SEVERITY_COLORS[level],
+            )
+            for level in ["Critical", "High", "Medium", "Low"]
         ]
 
-        top_attacker_ips: list[dict[str, Any]] = [
-            {"ip": "185.220.101.5", "country": "RU", "attempts": 1420, "threatScore": 98},
-            {"ip": "194.26.29.112", "country": "NL", "attempts": 980, "threatScore": 94},
-            {"ip": "45.142.214.20", "country": "DE", "attempts": 750, "threatScore": 82},
-            {"ip": "103.152.220.18", "country": "CN", "attempts": 540, "threatScore": 78},
-            {"ip": "193.142.146.210", "country": "UA", "attempts": 320, "threatScore": 71},
-        ]
+        # Timeline uses static shape (real streaming requires WebSocket/time-series DB)
+        timeline = _FALLBACK_TIMELINE
+
+        top_attacker_ips: list[dict[str, Any]] = []
 
         return DashboardStatisticsResponse(
             timeline=timeline,

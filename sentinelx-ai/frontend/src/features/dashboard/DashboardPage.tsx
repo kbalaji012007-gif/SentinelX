@@ -27,12 +27,8 @@ import {
   fetchDashboardStatistics,
   fetchRecentActivity,
 } from "../../services/dashboardService";
-import {
-  mockThreats,
-  mockTopAttackerIps,
-  mockTimelineData,
-  mockSeverityDistribution,
-} from "../../utils/mockData";
+import { fetchThreats } from "../../services/threatService";
+import { fetchIncidentStats } from "../../services/incidentService";
 
 export default function DashboardPage() {
   // Query 1: Summary KPI metrics
@@ -52,24 +48,42 @@ export default function DashboardPage() {
     queryFn: fetchDashboardStatistics,
   });
 
-  // Query 3: Recent Activity Stream
+  // Query 3: Recent Activity Stream (live from /dashboard/recent-activity)
   const { data: activity, isLoading: isActivityLoading } = useQuery({
     queryKey: ["dashboard-recent-activity"],
     queryFn: fetchRecentActivity,
+    refetchInterval: 60_000,
   });
 
-  // Fallback bindings when loading or offline
-  const activeThreats = summary?.active_threats_count ?? 7;
-  const criticalAlerts = summary?.critical_alerts_count ?? 18;
-  const openIncidents = summary?.open_incidents_count ?? 4;
-  const riskScore = summary?.current_risk_score ?? 78;
-  const assetCount = summary?.asset_count ?? 142;
-  const vulnCount = summary?.vulnerability_count ?? 66;
+  // Query 4: Live incident stats
+  const { data: incStats } = useQuery({
+    queryKey: ["incident-stats"],
+    queryFn: fetchIncidentStats,
+    refetchInterval: 30_000,
+  });
 
-  const timelineData = stats?.timeline || mockTimelineData;
-  const severityDistribution = stats?.severity_distribution || mockSeverityDistribution;
-  const topAttackerIps = stats?.top_attacker_ips || mockTopAttackerIps;
-  const activityList = activity || mockThreats;
+  // Query 5: Pre-warm threat cache for Threats page navigation
+  useQuery({
+    queryKey: ["threats", { page: 1, page_size: 5 }],
+    queryFn: () => fetchThreats({ page: 1, page_size: 5 }),
+    refetchInterval: 60_000,
+  });
+
+  // Live KPI bindings — fall back to 0 when DB is empty
+  const activeThreats = summary?.active_threats_count ?? 0;
+  const criticalAlerts = summary?.critical_alerts_count ?? 0;
+  const openIncidents = incStats?.open_incidents_count ?? (summary?.open_incidents_count ?? 0);
+  const criticalIncidents = incStats?.critical_incidents_count ?? 0;
+  const assignedToMe = incStats?.assigned_to_me_count ?? 0;
+  const recentlyResolved = incStats?.recently_resolved_count ?? 0;
+  const riskScore = summary?.current_risk_score ?? 10;
+  const assetCount = summary?.asset_count ?? 0;
+
+  const timelineData = stats?.timeline ?? [];
+  const severityDistribution = stats?.severity_distribution ?? [];
+  const topAttackerIps = stats?.top_attacker_ips ?? [];
+  // Use live recent-activity from threats table; fall back to empty
+  const activityList = activity ?? [];
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -113,14 +127,15 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards Row */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         {[
-          { label: "Active Threats", value: activeThreats, sub: "2 Zero-day", icon: FireIcon, color: "var(--color-critical)" },
-          { label: "Critical Alerts", value: criticalAlerts, sub: "Last 24h", icon: ExclamationTriangleIcon, color: "var(--color-high)" },
-          { label: "Open Incidents", value: openIncidents, sub: "2 SLA Urgent", icon: ShieldExclamationIcon, color: "var(--color-medium)" },
-          { label: "Risk Score", value: riskScore, sub: "High Exposure", icon: CpuChipIcon, color: "var(--color-high)" },
-          { label: "Monitored Assets", value: assetCount, sub: "98.5% Active", icon: ServerIcon, color: "var(--color-primary-500)" },
-          { label: "Vulnerabilities", value: vulnCount, sub: "14 Critical CVEs", icon: BugAntIcon, color: "var(--color-critical)" },
+          { label: "Active Threats", value: activeThreats, sub: "Live DB", icon: FireIcon, color: "var(--color-critical)" },
+          { label: "Critical Alerts", value: criticalAlerts, sub: "Unresolved", icon: ExclamationTriangleIcon, color: "var(--color-high)" },
+          { label: "Open Incidents", value: openIncidents, sub: "Active SOC", icon: ShieldExclamationIcon, color: "var(--color-medium)" },
+          { label: "Critical Incidents", value: criticalIncidents, sub: "P0/P1 High", icon: BugAntIcon, color: "var(--color-critical)" },
+          { label: "Assigned To Me", value: assignedToMe, sub: "Analyst Queue", icon: CpuChipIcon, color: "var(--color-primary-500)" },
+          { label: "Recently Resolved", value: recentlyResolved, sub: "Resolved/Closed", icon: ServerIcon, color: "var(--color-safe)" },
+          { label: "Risk Score", value: riskScore, sub: "Global Score", icon: CpuChipIcon, color: "var(--color-high)" },
         ].map((card) => (
           <div key={card.label} className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-border-hover)] transition-all">
             <div className="flex items-center justify-between mb-2">
