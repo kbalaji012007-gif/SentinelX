@@ -47,7 +47,6 @@ google-genai==1.14.0
 pytest==8.4.1
 pytest-asyncio==1.0.0
 pytest-cov==6.1.1
-httpx==0.28.1
 
 # Supabase
 supabase==2.15.2
