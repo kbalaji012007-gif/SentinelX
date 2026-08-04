@@ -45,14 +45,23 @@ class Settings(BaseSettings):
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def assemble_db_connection(cls, v: str | None) -> str:
-        if not v or not v.strip():
-            return "postgresql+asyncpg://postgres:postgres@localhost:5432/sentinelx"
-        v = v.strip()
+        default_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/sentinelx"
+        if not v:
+            return default_url
+        v = v.strip().strip("'\"")
+        if not v or v.lower() in ("none", "null", "undefined"):
+            return default_url
         if v.startswith("postgres://"):
-            return v.replace("postgres://", "postgresql+asyncpg://", 1)
-        if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
-            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
-        return v
+            v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        try:
+            from sqlalchemy.engine.url import make_url
+            make_url(v)
+            return v
+        except Exception:
+            return default_url
 
     # ── JWT Authentication ───────────────────────────────────────
     JWT_SECRET_KEY: str = "sentinelx-dev-secret-change-in-production"
