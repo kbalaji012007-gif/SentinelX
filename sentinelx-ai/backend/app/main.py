@@ -54,9 +54,9 @@ app = FastAPI(
     description="SentinelX AI – Autonomous Security Operations Platform. "
     "Intelligent threat detection, incident management, and AI-powered security analytics.",
     version=settings.APP_VERSION,
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
-    openapi_url="/openapi.json" if settings.DEBUG else None,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
     lifespan=lifespan,
 )
 
