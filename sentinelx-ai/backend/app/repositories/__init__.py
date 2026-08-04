@@ -1,6 +1,6 @@
 """
 SentinelX AI – Repositories Package
-Exposes all repository classes for Identity, Asset, Dashboard, and Threat modules.
+Exposes all repository classes for Identity, Asset, Dashboard, Threat, Incident, and Log modules.
 """
 
 from app.repositories.base_repo import BaseRepository
@@ -15,6 +15,7 @@ from app.repositories.incident_repo import (
     IncidentNoteRepository,
     IncidentEvidenceRepository,
 )
+from app.repositories.log_repo import LogSourceRepository, LogEntryRepository
 
 __all__ = [
     "BaseRepository",
@@ -30,4 +31,6 @@ __all__ = [
     "IncidentTimelineRepository",
     "IncidentNoteRepository",
     "IncidentEvidenceRepository",
+    "LogSourceRepository",
+    "LogEntryRepository",
 ]

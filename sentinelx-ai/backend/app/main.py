@@ -73,6 +73,7 @@ from app.api.v1.auth.router import router as auth_router
 from app.api.v1.dashboard.router import router as dashboard_router
 from app.api.v1.threats.router import router as threats_router, alerts_router, ioc_router
 from app.api.v1.incidents.router import router as incidents_router
+from app.api.v1.logs.router import router as logs_router
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
@@ -80,6 +81,7 @@ app.include_router(threats_router, prefix="/api/v1")
 app.include_router(alerts_router, prefix="/api/v1")
 app.include_router(ioc_router, prefix="/api/v1")
 app.include_router(incidents_router, prefix="/api/v1")
+app.include_router(logs_router, prefix="/api/v1")
 
 
 @app.get("/", tags=["Health"])

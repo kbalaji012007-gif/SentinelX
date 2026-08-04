@@ -1,6 +1,6 @@
 """
 SentinelX AI – Schemas Package
-Exposes Role, User, AssetGroup, Asset, Auth, and Threat/Alert/IOC Pydantic v2 schemas.
+Exposes Role, User, AssetGroup, Asset, Auth, Threat/Alert/IOC, Incident, and Log Pydantic v2 schemas.
 """
 
 from app.schemas.role_schema import RoleBase, RoleCreate, RoleUpdate, RoleResponse
@@ -51,6 +51,18 @@ from app.schemas.incident_schema import (
     IncidentEvidenceCreate,
     IncidentEvidenceResponse,
 )
+from app.schemas.log_schema import (
+    LogSourceCreate,
+    LogSourceUpdate,
+    LogSourceResponse,
+    LogSourceSummary,
+    LogSourceListResponse,
+    LogEntryCreate,
+    LogEntryResponse,
+    LogEntrySummary,
+    LogEntryListResponse,
+    LogEntryStatsResponse,
+)
 
 __all__ = [
     "RoleBase",
@@ -99,4 +111,14 @@ __all__ = [
     "IncidentNoteResponse",
     "IncidentEvidenceCreate",
     "IncidentEvidenceResponse",
+    "LogSourceCreate",
+    "LogSourceUpdate",
+    "LogSourceResponse",
+    "LogSourceSummary",
+    "LogSourceListResponse",
+    "LogEntryCreate",
+    "LogEntryResponse",
+    "LogEntrySummary",
+    "LogEntryListResponse",
+    "LogEntryStatsResponse",
 ]
