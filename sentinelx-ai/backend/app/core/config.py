@@ -3,6 +3,7 @@ SentinelX AI – Core Configuration
 Pydantic Settings for environment-based configuration.
 """
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,6 +41,18 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sentinelx"
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_db_connection(cls, v: str | None) -> str:
+        if not v or not v.strip():
+            return "postgresql+asyncpg://postgres:postgres@localhost:5432/sentinelx"
+        v = v.strip()
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
     # ── JWT Authentication ───────────────────────────────────────
     JWT_SECRET_KEY: str = "sentinelx-dev-secret-change-in-production"
