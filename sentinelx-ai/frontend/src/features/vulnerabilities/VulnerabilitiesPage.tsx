@@ -1,13 +1,23 @@
+import { useQuery } from "@tanstack/react-query";
 import { BugAntIcon, ShieldExclamationIcon, WrenchScrewdriverIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { fetchDashboardSummary } from "../../services/dashboardService";
 import { mockCves } from "../../utils/mockData";
 
 export default function VulnerabilitiesPage() {
+  const { data: summaryData } = useQuery({
+    queryKey: ["dashboard-summary"],
+    queryFn: fetchDashboardSummary,
+    refetchInterval: 30000,
+  });
+
+  const totalVulnerabilities = summaryData?.vulnerability_count ?? 0;
+
   const cvssBreakdown = [
-    { name: "Critical (9.0-10.0)", value: 14, color: "#ff1744" },
-    { name: "High (7.0-8.9)", value: 28, color: "#ff6d00" },
-    { name: "Medium (4.0-6.9)", value: 18, color: "#ffd600" },
-    { name: "Low (0.1-3.9)", value: 6, color: "#448aff" },
+    { name: "Critical (9.0-10.0)", value: 0, color: "#ff1744" },
+    { name: "High (7.0-8.9)", value: 0, color: "#ff6d00" },
+    { name: "Medium (4.0-6.9)", value: 0, color: "#ffd600" },
+    { name: "Low (0.1-3.9)", value: 0, color: "#448aff" },
   ];
 
   return (
@@ -25,10 +35,10 @@ export default function VulnerabilitiesPage() {
       {/* KPI Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: "Total Vulnerabilities", value: "66", icon: BugAntIcon, color: "var(--color-primary-500)" },
-          { label: "Critical CVEs", value: "14", icon: ShieldExclamationIcon, color: "var(--color-critical)" },
-          { label: "Pending Patch", value: "32", icon: WrenchScrewdriverIcon, color: "var(--color-high)" },
-          { label: "Patched (30 Days)", value: "124", icon: CheckCircleIcon, color: "var(--color-safe)" },
+          { label: "Total Vulnerabilities", value: totalVulnerabilities, icon: BugAntIcon, color: "var(--color-primary-500)" },
+          { label: "Critical CVEs", value: 0, icon: ShieldExclamationIcon, color: "var(--color-critical)" },
+          { label: "Pending Patch", value: 0, icon: WrenchScrewdriverIcon, color: "var(--color-high)" },
+          { label: "Patched (30 Days)", value: 0, icon: CheckCircleIcon, color: "var(--color-safe)" },
         ].map((kpi) => (
           <div key={kpi.label} className="glass rounded-xl p-4 border border-[var(--color-border)] flex items-center justify-between">
             <div>
