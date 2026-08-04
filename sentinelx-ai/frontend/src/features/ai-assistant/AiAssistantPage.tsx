@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { SparklesIcon, PaperAirplaneIcon, UserIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
+import { useAuth } from "../../contexts/AuthContext";
 
 interface ChatMessage {
   id: string;
@@ -10,16 +11,42 @@ interface ChatMessage {
 }
 
 export default function AiAssistantPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
+  const { user } = useAuth();
+
+  // Extract first name (preferred), fallback to full name/email, fallback to "Analyst" when no user is logged in
+  const firstName = user?.first_name?.trim() || user?.email?.split("@")[0] || "Analyst";
+  const userDisplayName = user
+    ? `${user.first_name} ${user.last_name}`.trim() || user.first_name || user.email
+    : "Analyst";
+
+  const getGreetingText = (name: string) =>
+    `Greetings ${name}. I am Gemini Sentinel AI, your autonomous Security Operations assistant. How can I assist your investigation today?`;
+
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
       id: "1",
       sender: "gemini",
-      text: "Greetings Analyst Rivera. I am Gemini Sentinel AI, your autonomous Security Operations assistant. I am monitoring 142 assets and correlating 7 active threats. How can I assist your investigation today?",
-      timestamp: "16:00",
+      text: getGreetingText(firstName),
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+
+  // Dynamically update greeting if user changes / logs in
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length > 0 && prev[0].id === "1" && prev[0].sender === "gemini") {
+        const updated = [...prev];
+        updated[0] = {
+          ...updated[0],
+          text: getGreetingText(firstName),
+        };
+        return updated;
+      }
+      return prev;
+    });
+  }, [firstName]);
 
   const suggestedPrompts = [
     "Summarize active threat THR-9021 (SSH Brute Force)",
@@ -49,7 +76,7 @@ export default function AiAssistantPage() {
       let codeBlock: string | undefined = undefined;
 
       if (query.includes("THR-9021") || query.includes("SSH")) {
-        aiText = "Threat THR-9021 involves a brute-force SSH campaign targeting prod-db-master-01 (10.0.1.10) from malicious Tor exit IP 185.220.101.5. Over 1,420 failed authentication attempts detected within a 15-minute sliding window.";
+        aiText = `Threat THR-9021 involves a brute-force SSH campaign targeting prod-db-master-01 (10.0.1.10) from malicious Tor exit IP 185.220.101.5. Over 1,420 failed authentication attempts detected within a 15-minute sliding window.`;
         codeBlock = `PLAYBOOK EXECUTION RECOMMENDED:\n1. block_ip.py --ip "185.220.101.5"\n2. isolate_host.py --target "10.0.1.10"\n3. collect_logs.py --timeframe "last-1h"`;
       } else if (query.includes("CVE")) {
         aiText = "Identified 2 Critical CVEs requiring immediate patching:\n- CVE-2026-21048 (CVSS 9.8) Kernel eBPF Memory Write\n- CVE-2026-19022 (CVSS 9.1) Palo Alto PAN-OS Command Injection";
@@ -131,7 +158,7 @@ export default function AiAssistantPage() {
               }`}
             >
               <div className="flex items-center justify-between text-[10px] text-[var(--color-text-muted)] font-mono mb-1">
-                <span>{msg.sender === "user" ? "Alex Rivera" : "Gemini Sentinel"}</span>
+                <span>{msg.sender === "user" ? userDisplayName : "Gemini Sentinel"}</span>
                 <span>{msg.timestamp}</span>
               </div>
 

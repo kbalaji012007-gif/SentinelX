@@ -4,9 +4,9 @@ import { useAuth } from "../../contexts/AuthContext";
 export default function Header() {
   const { user, logout } = useAuth();
 
-  const userName = user ? `${user.first_name} ${user.last_name}` : "Alex Rivera";
-  const userRole = user?.role?.name || "Senior SOC Analyst";
-  const initials = user ? `${user.first_name[0]}${user.last_name[0]}` : "AR";
+  const userName = user ? `${user.first_name} ${user.last_name}`.trim() || user.email : "Analyst";
+  const userRole = user?.role?.name || "SOC Analyst";
+  const initials = user ? `${user.first_name?.[0] || ""}${user.last_name?.[0] || ""}` || "A" : "A";
 
   return (
     <header className="h-16 border-b border-[var(--color-border)] bg-[var(--color-surface-100)]/80 backdrop-blur-md sticky top-0 z-20 flex items-center justify-between px-6">
