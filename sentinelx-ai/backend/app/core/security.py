@@ -6,6 +6,7 @@ Bcrypt password hashing, JWT token creation, and validation utilities.
 from datetime import datetime, timedelta, timezone
 from typing import Any
 import jwt
+import bcrypt
 from passlib.context import CryptContext
 from fastapi import HTTPException, status
 
@@ -16,13 +17,24 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain text password against a bcrypt hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a plain text password against a bcrypt hash with direct bcrypt fallback."""
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        pass
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    except Exception:
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    """Generate a bcrypt hash from a plain text password."""
-    return pwd_context.hash(password)
+    """Generate a bcrypt hash from a plain text password with direct bcrypt fallback."""
+    try:
+        return pwd_context.hash(password)
+    except Exception:
+        salt = bcrypt.gensalt()
+        return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 
 def create_access_token(subject: str | Any, role: str, expires_delta: timedelta | None = None) -> str:
