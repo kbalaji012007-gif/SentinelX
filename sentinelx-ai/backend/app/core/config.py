@@ -92,6 +92,9 @@ class Settings(BaseSettings):
         elif v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
             v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
 
+        if "?" in v:
+            v = v.split("?")[0]
+
         try:
             from sqlalchemy.engine.url import make_url
             make_url(v)

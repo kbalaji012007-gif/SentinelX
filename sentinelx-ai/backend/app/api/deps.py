@@ -41,11 +41,21 @@ async_session_factory = async_sessionmaker(
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Provide asynchronous database session dependency."""
-    async with async_session_factory() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+    try:
+        async with async_session_factory() as session:
+            try:
+                yield session
+            finally:
+                await session.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database Connection Error: {str(e)} | {tb[-300:]}"
+        )
 
 
 async def get_current_user(
