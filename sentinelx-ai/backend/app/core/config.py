@@ -76,12 +76,12 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
-    DATABASE_URL: str = "postgresql+asyncpg://sentinelx_dev:SentinelX2026Pass!@db.epxtwnulvkmtxwfesxnc.supabase.co:5432/postgres"
+    DATABASE_URL: str = "postgresql+asyncpg://sentinelx_dev.epxtwnulvkmtxwfesxnc:SentinelX2026Pass!@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def assemble_db_connection(cls, v: str | None) -> str:
-        default_url = "postgresql+asyncpg://sentinelx_dev:SentinelX2026Pass!@db.epxtwnulvkmtxwfesxnc.supabase.co:5432/postgres"
+        default_url = "postgresql+asyncpg://sentinelx_dev.epxtwnulvkmtxwfesxnc:SentinelX2026Pass!@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
         if not v:
             return default_url
         v = v.strip().strip("'\"")
