@@ -127,7 +127,7 @@ def upgrade() -> None:
         sa.Column("message", sa.Text(), nullable=True),
         sa.Column(
             "raw_event",
-            postgresql.JSONB(as_text=True),
+            postgresql.JSONB(),
             nullable=False,
             server_default=sa.text("'{}'::jsonb"),
         ),

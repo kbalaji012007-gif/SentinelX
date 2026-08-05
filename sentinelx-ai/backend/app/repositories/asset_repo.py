@@ -34,6 +34,16 @@ class AssetRepository(BaseRepository[Asset]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(Asset, session)
 
+    async def get_all(self, skip: int = 0, limit: int = 100) -> Sequence[Asset]:
+        """Fetch all assets with eager-loaded asset_group."""
+        result = await self.session.execute(
+            select(Asset)
+            .options(selectinload(Asset.asset_group))
+            .offset(skip)
+            .limit(limit)
+        )
+        return result.scalars().all()
+
     async def get_by_hostname(self, hostname: str) -> Asset | None:
         """Fetch asset by unique hostname with eager-loaded asset group."""
         result = await self.session.execute(

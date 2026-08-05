@@ -58,7 +58,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=20), nullable=False, server_default=sa.text("'Active'")),
         sa.Column("location", sa.String(length=100), nullable=True),
         sa.Column("serial_number", sa.String(length=100), nullable=True),
-        sa.Column("tags", postgresql.JSONB(as_text=True), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column("tags", postgresql.JSONB(), nullable=False, server_default=sa.text("'[]'::jsonb")),
         sa.Column("last_seen", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),

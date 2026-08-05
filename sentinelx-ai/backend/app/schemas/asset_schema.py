@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
-AssetTypeEnum = Literal["Server", "Workstation", "Cloud Resource", "Router", "Switch", "Firewall"]
+AssetTypeEnum = Literal["Server", "Workstation", "Cloud Resource", "Router", "Switch", "Firewall", "Network Device"]
 CriticalityEnum = Literal["Critical", "High", "Medium", "Low"]
 StatusEnum = Literal["Active", "Inactive", "Maintenance", "Decommissioned"]
 

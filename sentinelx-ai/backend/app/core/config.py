@@ -3,6 +3,7 @@ SentinelX AI – Core Configuration
 Pydantic Settings for environment-based configuration.
 """
 
+from typing import Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -31,21 +32,56 @@ class Settings(BaseSettings):
 
     # ── CORS ─────────────────────────────────────────────────────
     CORS_ORIGINS: list[str] = [
+        "https://sentinel-x-gray.vercel.app",
         "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
     ]
 
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Any) -> list[str]:
+        default_origins = [
+            "https://sentinel-x-gray.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+        ]
+        if isinstance(v, str):
+            if v.startswith("[") and v.endswith("]"):
+                import json
+                try:
+                    parsed = json.loads(v)
+                    if isinstance(parsed, list):
+                        for d in default_origins:
+                            if d not in parsed:
+                                parsed.append(d)
+                        return parsed
+                except Exception:
+                    pass
+            origins = [i.strip() for i in v.split(",") if i.strip()]
+            for d in default_origins:
+                if d not in origins:
+                    origins.append(d)
+            return origins
+        elif isinstance(v, list):
+            origins = list(v)
+            for d in default_origins:
+                if d not in origins:
+                    origins.append(d)
+            return origins
+        return default_origins
+
     # ── Supabase Database ────────────────────────────────────────
     SUPABASE_URL: str = ""
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sentinelx"
+    DATABASE_URL: str = "postgresql+asyncpg://sentinelx_dev:SentinelX2026Pass!@db.epxtwnulvkmtxwfesxnc.supabase.co:5432/postgres"
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def assemble_db_connection(cls, v: str | None) -> str:
-        default_url = "postgresql+asyncpg://postgres:postgres@localhost:5432/sentinelx"
+        default_url = "postgresql+asyncpg://sentinelx_dev:SentinelX2026Pass!@db.epxtwnulvkmtxwfesxnc.supabase.co:5432/postgres"
         if not v:
             return default_url
         v = v.strip().strip("'\"")

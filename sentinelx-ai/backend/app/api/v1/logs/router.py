@@ -236,6 +236,12 @@ async def search_log_entries(
 
 
 @router.get(
+    "/stats",
+    response_model=LogEntryStatsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Log collection statistics",
+)
+@router.get(
     "/statistics",
     response_model=LogEntryStatsResponse,
     status_code=status.HTTP_200_OK,
@@ -336,28 +342,6 @@ async def get_logs_count_by_event_type(
 
 
 @router.get(
-    "/{entry_id}",
-    response_model=LogEntryResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Get log entry detail",
-)
-async def get_log_entry(
-    entry_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_READERS)),
-) -> LogEntryResponse:
-    """Retrieve full details for a single log entry."""
-    service = LogEntryService(db)
-    entry = await service.entry_repo.get_by_id(entry_id)
-    if not entry:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Log entry {entry_id} not found",
-        )
-    return LogEntryResponse.model_validate(entry)
-
-
-@router.get(
     "",
     response_model=LogEntryListResponse,
     status_code=status.HTTP_200_OK,
@@ -390,6 +374,28 @@ async def list_log_entries(
         )
     except ValidationError as exc:
         _handle_domain_exception(exc)
+
+
+@router.get(
+    "/{entry_id}",
+    response_model=LogEntryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get log entry detail",
+)
+async def get_log_entry(
+    entry_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> LogEntryResponse:
+    """Retrieve full details for a single log entry."""
+    service = LogEntryService(db)
+    entry = await service.entry_repo.get_by_id(entry_id)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Log entry {entry_id} not found",
+        )
+    return LogEntryResponse.model_validate(entry)
 
 
 @router.post(
