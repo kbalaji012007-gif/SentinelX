@@ -15,6 +15,9 @@ from app.models.user import User
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
+import traceback
+from fastapi import APIRouter, Depends, status, HTTPException
+
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
 async def login(
     payload: LoginRequest,
@@ -22,11 +25,20 @@ async def login(
 ):
     """Authenticate user credentials and issue JWT Access and Refresh Tokens."""
     auth_service = AuthService(db)
-    return await auth_service.authenticate_user(
-        email=payload.email,
-        password=payload.password,
-        remember_me=payload.remember_me,
-    )
+    try:
+        return await auth_service.authenticate_user(
+            email=payload.email,
+            password=payload.password,
+            remember_me=payload.remember_me,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        tb = traceback.format_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Auth Error: {str(e)} | Trace: {tb[-500:]}"
+        )
 
 
 @router.post("/refresh", response_model=TokenResponse, status_code=status.HTTP_200_OK)
