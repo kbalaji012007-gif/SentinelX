@@ -14,7 +14,13 @@ from app.core.security import decode_token
 from app.models.user import User
 from app.repositories.user_repo import UserRepository
 
+import ssl
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+ssl_ctx = ssl.create_default_context()
+ssl_ctx.check_hostname = False
+ssl_ctx.verify_mode = ssl.CERT_NONE
 
 # Async SQLAlchemy Engine
 engine = create_async_engine(
@@ -23,6 +29,7 @@ engine = create_async_engine(
     future=True,
     pool_size=10,
     max_overflow=20,
+    connect_args={"ssl": ssl_ctx},
 )
 
 async_session_factory = async_sessionmaker(
