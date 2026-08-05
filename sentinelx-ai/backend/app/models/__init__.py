@@ -11,6 +11,13 @@ from app.models.asset import Asset
 from app.models.threat import Threat, Alert, IOC
 from app.models.incident import Incident, IncidentTimeline, IncidentNote, IncidentEvidence
 from app.models.log import LogSource, LogEntry
+from app.models.threat_intelligence import (
+    ThreatFeed,
+    IOCFeed,
+    IOCReputation,
+    MitreTechnique,
+    ThreatCache,
+)
 
 __all__ = [
     "Base",
@@ -28,4 +35,9 @@ __all__ = [
     "IncidentEvidence",
     "LogSource",
     "LogEntry",
+    "ThreatFeed",
+    "IOCFeed",
+    "IOCReputation",
+    "MitreTechnique",
+    "ThreatCache",
 ]

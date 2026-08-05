@@ -16,6 +16,12 @@ from app.repositories.incident_repo import (
     IncidentEvidenceRepository,
 )
 from app.repositories.log_repo import LogSourceRepository, LogEntryRepository
+from app.repositories.threat_intelligence_repo import (
+    ThreatFeedRepository,
+    IOCRepository as ThreatIntelIOCRepository,
+    MitreRepository,
+    ThreatCacheRepository,
+)
 
 __all__ = [
     "BaseRepository",
@@ -33,4 +39,8 @@ __all__ = [
     "IncidentEvidenceRepository",
     "LogSourceRepository",
     "LogEntryRepository",
+    "ThreatFeedRepository",
+    "ThreatIntelIOCRepository",
+    "MitreRepository",
+    "ThreatCacheRepository",
 ]
