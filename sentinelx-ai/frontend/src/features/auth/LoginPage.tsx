@@ -47,7 +47,7 @@ export default function LoginPage() {
 
   const fillDemoAnalyst = () => {
     setEmail("alex.rivera@sentinelx.ai");
-    setPassword("Password123!");
+    setPassword("SentiX#2026!SecOpsPass");
     setError(null);
   };
 
