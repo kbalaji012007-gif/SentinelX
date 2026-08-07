@@ -5,7 +5,6 @@ import {
   LockClosedIcon,
   EnvelopeIcon,
   ExclamationCircleIcon,
-  SparklesIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { useAuth } from "../../contexts/AuthContext";
@@ -45,12 +44,6 @@ export default function LoginPage() {
     }
   };
 
-  const fillDemoAnalyst = () => {
-    setEmail("alex.rivera@sentinelx.ai");
-    setPassword("SentiX#2026!SecOpsPass");
-    setError(null);
-  };
-
   return (
     <div className="min-h-screen bg-[var(--color-surface-0)] text-[var(--color-text-primary)] flex items-center justify-center p-4 relative overflow-hidden select-none">
       {/* Background Cyber Glow Gradients */}
@@ -74,22 +67,8 @@ export default function LoginPage() {
         {/* Login Form Glass Card */}
         <div className="glass rounded-2xl p-8 border border-[var(--color-border)] shadow-2xl space-y-6">
           <div className="border-b border-[var(--color-border)] pb-3">
-            <h2 className="text-base font-bold text-[var(--color-text-primary)]">Analyst Authentication</h2>
+            <h2 className="text-base font-bold text-[var(--color-text-primary)]">Administrator Authentication</h2>
             <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Enter your credentials to access the SOC Command Center</p>
-          </div>
-
-          {/* Quick Fill Demo Banner */}
-          <div className="p-3 rounded-xl bg-[var(--color-surface-200)] border border-[var(--color-border)] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <SparklesIcon className="w-4 h-4 text-[var(--color-secondary-500)]" />
-              <span className="text-xs text-[var(--color-text-secondary)] font-medium">Demo Analyst Account</span>
-            </div>
-            <button
-              onClick={fillDemoAnalyst}
-              className="text-[10px] font-bold px-2.5 py-1 rounded bg-[var(--color-secondary-500)]/20 text-[var(--color-secondary-500)] hover:bg-[var(--color-secondary-500)]/30 transition-colors"
-            >
-              Auto-Fill Credentials
-            </button>
           </div>
 
           {/* Error Callout Alert */}
@@ -104,7 +83,7 @@ export default function LoginPage() {
             {/* Email Field */}
             <div className="space-y-1">
               <label className="block text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider">
-                Analyst Email
+                Email Address
               </label>
               <div className="relative">
                 <EnvelopeIcon className="w-4 h-4 text-[var(--color-text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -112,7 +91,7 @@ export default function LoginPage() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="analyst@sentinelx.ai"
+                  placeholder="admin@sentinelx.ai"
                   className="w-full bg-[var(--color-surface-200)] text-xs font-mono text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] rounded-xl pl-10 pr-4 py-2.5 border border-[var(--color-border)] focus:outline-none focus:border-[var(--color-primary-500)] focus:ring-1 focus:ring-[var(--color-primary-500)] transition-all"
                   required
                 />
@@ -207,10 +186,10 @@ export default function LoginPage() {
               </div>
             ) : (
               <div className="space-y-3 text-xs">
-                <p className="text-[var(--color-text-secondary)]">Enter your registered SOC analyst email to receive a password reset token.</p>
+                <p className="text-[var(--color-text-secondary)]">Enter your registered email to receive a password reset token.</p>
                 <input
                   type="email"
-                  placeholder="analyst@sentinelx.ai"
+                  placeholder="admin@sentinelx.ai"
                   className="w-full bg-[var(--color-surface-200)] px-3 py-2 rounded-lg border border-[var(--color-border)] text-[var(--color-text-primary)] font-mono"
                 />
                 <button

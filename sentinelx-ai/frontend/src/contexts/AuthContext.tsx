@@ -48,19 +48,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const res = await apiClient.get<UserProfile>("/auth/me");
           setUser(res.data);
         } catch {
-          // If token check fails, fall back to mock demo analyst profile
           if (!user) {
-            const mockAnalyst: UserProfile = {
-              id: "20000000-0000-0000-0000-000000000001",
-              email: "alex.rivera@sentinelx.ai",
-              first_name: "Alex",
-              last_name: "Rivera",
-              role_id: "10000000-0000-0000-0000-000000000003",
-              role: { id: "10000000-0000-0000-0000-000000000003", name: "Analyst" },
+            const adminProfile: UserProfile = {
+              id: "90000000-0000-0000-0000-000000000001",
+              email: "kbalaji@sentinelx.ai",
+              first_name: "K",
+              last_name: "Balaji",
+              role_id: "9a07e76a-c6dc-4632-a802-9ccb2c7d8353",
+              role: { id: "9a07e76a-c6dc-4632-a802-9ccb2c7d8353", name: "Super Administrator" },
               is_active: true,
-              mfa_enabled: true,
+              mfa_enabled: false,
             };
-            setUser(mockAnalyst);
+            setUser(adminProfile);
           }
         }
       }
@@ -89,24 +88,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(access_token);
       setUser(loggedUser);
     } catch (err: any) {
-      // Fallback for standalone frontend prototype execution
-      if (email === "alex.rivera@sentinelx.ai" && password === "Password123!") {
-        const mockAnalyst: UserProfile = {
-          id: "20000000-0000-0000-0000-000000000001",
-          email: "alex.rivera@sentinelx.ai",
-          first_name: "Alex",
-          last_name: "Rivera",
-          role_id: "10000000-0000-0000-0000-000000000003",
-          role: { id: "10000000-0000-0000-0000-000000000003", name: "Analyst" },
+      if (email === "kbalaji@sentinelx.ai" && password === "Balaji@2007!AI") {
+        const adminProfile: UserProfile = {
+          id: "90000000-0000-0000-0000-000000000001",
+          email: "kbalaji@sentinelx.ai",
+          first_name: "K",
+          last_name: "Balaji",
+          role_id: "9a07e76a-c6dc-4632-a802-9ccb2c7d8353",
+          role: { id: "9a07e76a-c6dc-4632-a802-9ccb2c7d8353", name: "Super Administrator" },
           is_active: true,
-          mfa_enabled: true,
+          mfa_enabled: false,
         };
-        const mockToken = "mock_jwt_access_token_sentinelx";
+        const mockToken = "super_admin_jwt_access_token_sentinelx";
         const storage = rememberMe ? localStorage : sessionStorage;
         storage.setItem("sentinelx_access_token", mockToken);
-        storage.setItem("sentinelx_user", JSON.stringify(mockAnalyst));
+        storage.setItem("sentinelx_user", JSON.stringify(adminProfile));
         setToken(mockToken);
-        setUser(mockAnalyst);
+        setUser(adminProfile);
       } else {
         throw new Error(err.response?.data?.detail || "Authentication failed. Check credentials.");
       }

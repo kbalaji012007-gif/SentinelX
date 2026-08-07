@@ -88,7 +88,7 @@ export interface UserMock {
   id: string;
   name: string;
   email: string;
-  role: "Admin" | "Senior SOC Analyst" | "SOC Manager" | "Incident Responder" | "Auditor";
+  role: "Super Administrator" | "Admin" | "Senior SOC Analyst" | "SOC Manager" | "Incident Responder" | "Auditor";
   department: string;
   status: "Active" | "Inactive";
   mfaEnabled: boolean;
@@ -500,12 +500,12 @@ export const mockReports: ReportMock[] = [
 export const mockUsers: UserMock[] = [
   {
     id: "USR-001",
-    name: "Alex Rivera",
-    email: "alex.rivera@sentinelx.ai",
-    role: "Senior SOC Analyst",
-    department: "SOC Operations",
+    name: "K Balaji",
+    email: "kbalaji@sentinelx.ai",
+    role: "Super Administrator",
+    department: "Executive Security Operations",
     status: "Active",
-    mfaEnabled: true,
+    mfaEnabled: false,
     lastLogin: "Just now",
   },
   {

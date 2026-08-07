@@ -44,7 +44,7 @@ export default function SettingsPage() {
               <label className="block font-medium text-[var(--color-text-muted)] mb-1">Full Name</label>
               <input
                 type="text"
-                defaultValue="Alex Rivera"
+                defaultValue="K Balaji"
                 className="w-full bg-[var(--color-surface-200)] px-3 py-2 rounded-lg border border-[var(--color-border)] text-[var(--color-text-primary)]"
               />
             </div>
@@ -52,7 +52,7 @@ export default function SettingsPage() {
               <label className="block font-medium text-[var(--color-text-muted)] mb-1">Email Address</label>
               <input
                 type="email"
-                defaultValue="alex.rivera@sentinelx.ai"
+                defaultValue="kbalaji@sentinelx.ai"
                 className="w-full bg-[var(--color-surface-200)] px-3 py-2 rounded-lg border border-[var(--color-border)] text-[var(--color-text-primary)] font-mono"
               />
             </div>
