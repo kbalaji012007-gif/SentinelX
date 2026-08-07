@@ -58,7 +58,7 @@ export default function Sidebar() {
   const assetsCount = summaryData?.asset_count ?? 0;
   const logsCount = logsData?.total ?? 0;
 
-  const navigation = [
+  const mainNavigation = [
     { name: "Dashboard", href: "/", icon: HomeIcon },
     { name: "Threats", href: "/threats", icon: ExclamationTriangleIcon, badge: threatsCount },
     { name: "Incidents", href: "/incidents", icon: ShieldExclamationIcon, badge: incidentsCount },
@@ -72,7 +72,10 @@ export default function Sidebar() {
     { name: "Reports", href: "/reports", icon: DocumentChartBarIcon },
     { name: "AI Assistant", href: "/ai-assistant", icon: SparklesIcon, highlight: true },
     { name: "AI SOC Analyst", href: "/ai-soc", icon: SparklesIcon, highlight: true },
-    { name: "Users", href: "/users", icon: UsersIcon },
+  ];
+
+  const adminNavigation = [
+    { name: "User Management", href: "/users", icon: UsersIcon },
     { name: "Settings", href: "/settings", icon: Cog6ToothIcon },
   ];
 
@@ -94,47 +97,77 @@ export default function Sidebar() {
       </div>
 
       {/* Navigation Menu */}
-      <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-        <p className="px-3 text-[10px] text-[var(--color-text-muted)] font-bold uppercase tracking-widest mb-2 mt-1">
-          Command Center
-        </p>
-        {navigation.map((item) => (
-          <NavLink
-            key={item.name}
-            to={item.href}
-            end={item.href === "/"}
-            className={({ isActive }) =>
-              `flex items-center justify-between px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all duration-150 ${
-                isActive
-                  ? "bg-gradient-to-r from-[var(--color-primary-500)]/15 to-transparent text-[var(--color-primary-500)] font-semibold border-l-2 border-[var(--color-primary-500)] shadow-[0_0_12px_rgba(0,229,255,0.1)]"
-                  : item.highlight
-                  ? "text-[var(--color-secondary-500)] hover:bg-[var(--color-secondary-500)]/10"
-                  : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-200)] hover:text-[var(--color-text-primary)]"
-              }`
-            }
-          >
-            <div className="flex items-center gap-3">
-              <item.icon className={`w-4 h-4 shrink-0 ${item.highlight ? "text-[var(--color-secondary-500)] animate-pulse" : ""}`} />
-              <span>{item.name}</span>
-            </div>
-
-            {item.badge !== undefined && (
-              <span
-                className={`px-2 py-0.5 text-[10px] font-bold rounded-full font-mono ${
-                  item.name === "Threats" && Number(item.badge) > 0
-                    ? "bg-[var(--color-critical)]/20 text-[var(--color-critical)] border border-[var(--color-critical)]/30"
-                    : item.name === "Incidents" && Number(item.badge) > 0
-                    ? "bg-[var(--color-high)]/20 text-[var(--color-high)] border border-[var(--color-high)]/30"
-                    : item.name === "Logs" && Number(item.badge) > 0
-                    ? "bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] border border-[var(--color-primary-500)]/30"
-                    : "bg-[var(--color-surface-300)] text-[var(--color-text-muted)]"
-                }`}
+      <nav className="flex-1 overflow-y-auto p-3 space-y-4">
+        <div>
+          <p className="px-3 text-[10px] text-[var(--color-text-muted)] font-bold uppercase tracking-widest mb-2 mt-1">
+            Command Center
+          </p>
+          <div className="space-y-1">
+            {mainNavigation.map((item) => (
+              <NavLink
+                key={item.name}
+                to={item.href}
+                end={item.href === "/"}
+                className={({ isActive }) =>
+                  `flex items-center justify-between px-3.5 py-2 rounded-lg text-xs font-medium transition-all duration-150 ${
+                    isActive
+                      ? "bg-gradient-to-r from-[var(--color-primary-500)]/15 to-transparent text-[var(--color-primary-500)] font-semibold border-l-2 border-[var(--color-primary-500)] shadow-[0_0_12px_rgba(0,229,255,0.1)]"
+                      : item.highlight
+                      ? "text-[var(--color-secondary-500)] hover:bg-[var(--color-secondary-500)]/10"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-200)] hover:text-[var(--color-text-primary)]"
+                  }`
+                }
               >
-                {item.badge}
-              </span>
-            )}
-          </NavLink>
-        ))}
+                <div className="flex items-center gap-3">
+                  <item.icon className={`w-4 h-4 shrink-0 ${item.highlight ? "text-[var(--color-secondary-500)] animate-pulse" : ""}`} />
+                  <span>{item.name}</span>
+                </div>
+
+                {item.badge !== undefined && (
+                  <span
+                    className={`px-2 py-0.5 text-[10px] font-bold rounded-full font-mono ${
+                      item.name === "Threats" && Number(item.badge) > 0
+                        ? "bg-[var(--color-critical)]/20 text-[var(--color-critical)] border border-[var(--color-critical)]/30"
+                        : item.name === "Incidents" && Number(item.badge) > 0
+                        ? "bg-[var(--color-high)]/20 text-[var(--color-high)] border border-[var(--color-high)]/30"
+                        : item.name === "Logs" && Number(item.badge) > 0
+                        ? "bg-[var(--color-primary-500)]/20 text-[var(--color-primary-500)] border border-[var(--color-primary-500)]/30"
+                        : "bg-[var(--color-surface-300)] text-[var(--color-text-muted)]"
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </NavLink>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="px-3 text-[10px] text-[var(--color-text-muted)] font-bold uppercase tracking-widest mb-2">
+            Administration
+          </p>
+          <div className="space-y-1">
+            {adminNavigation.map((item) => (
+              <NavLink
+                key={item.name}
+                to={item.href}
+                className={({ isActive }) =>
+                  `flex items-center justify-between px-3.5 py-2 rounded-lg text-xs font-medium transition-all duration-150 ${
+                    isActive
+                      ? "bg-gradient-to-r from-[var(--color-primary-500)]/15 to-transparent text-[var(--color-primary-500)] font-semibold border-l-2 border-[var(--color-primary-500)] shadow-[0_0_12px_rgba(0,229,255,0.1)]"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-200)] hover:text-[var(--color-text-primary)]"
+                  }`
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <item.icon className="w-4 h-4 shrink-0 text-[var(--color-primary-500)]" />
+                  <span>{item.name}</span>
+                </div>
+              </NavLink>
+            ))}
+          </div>
+        </div>
       </nav>
 
       {/* Footer Status */}
