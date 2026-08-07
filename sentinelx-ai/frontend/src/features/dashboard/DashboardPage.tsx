@@ -12,6 +12,7 @@ import {
   CheckCircleIcon,
   LinkIcon,
   ShieldCheckIcon,
+  BoltIcon,
 } from "@heroicons/react/24/outline";
 import {
   AreaChart,
@@ -50,6 +51,7 @@ import {
   fetchAttackChains,
   fetchMitreMappings,
 } from "../../services/correlationService";
+import { fetchSOARStats } from "../../services/soarService";
 
 export default function DashboardPage() {
   // ── 1. General Dashboard Queries ─────────────────────────────────────────
@@ -184,6 +186,13 @@ export default function DashboardPage() {
     refetchInterval: 30000,
   });
 
+  // ── 5. SOAR Engine Queries ───────────────────────────────────────────────
+  const { data: soarStats } = useQuery({
+    queryKey: ["soar-stats"],
+    queryFn: fetchSOARStats,
+    refetchInterval: 15000,
+  });
+
   // ── Computed Log Telemetry Metrics ──────────────────────────────────────
   const totalLogsToday = logStats?.total_entries ?? 0;
   const activeLogSourcesCount = logSourcesSummary?.total ?? 0;
@@ -215,6 +224,14 @@ export default function DashboardPage() {
   const recentCorrelationsList = recentCorrelationsData?.items || [];
   const attackChainsList = attackChainsSummary?.items || [];
 
+  // SOAR bindings
+  const totalPlaybooksCount = soarStats?.total_playbooks ?? 0;
+  const activeRulesCount = soarStats?.active_rules ?? 0;
+  const pendingApprovalsCount = soarStats?.pending_approvals ?? 0;
+  const executionsTodayCount = soarStats?.executions_today ?? 0;
+  const successfulExecutionsCount = soarStats?.successful_executions ?? 0;
+  const failedExecutionsCount = soarStats?.failed_executions ?? 0;
+
   return (
     <div className="space-y-6 animate-fade-in pb-12">
       {/* Error Callout Banner */}
@@ -245,11 +262,11 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <Link
-            to="/correlation"
+            to="/soar"
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--color-primary-500)] text-[var(--color-surface-0)] text-xs font-bold hover:bg-[var(--color-primary-600)] transition-all shadow-lg shadow-[var(--color-primary-500)]/20"
           >
-            <LinkIcon className="w-4 h-4" />
-            <span>Correlation Engine</span>
+            <BoltIcon className="w-4 h-4" />
+            <span>SOAR Engine</span>
           </Link>
           <div className="px-4 py-2 rounded-xl bg-[var(--color-surface-300)]/60 border border-[var(--color-border)] flex items-center gap-3">
             <div>
@@ -259,6 +276,69 @@ export default function DashboardPage() {
               </p>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ── SOAR Engine Automation Telemetry Row ────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
+          <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider block mb-1">
+            Total Playbooks
+          </span>
+          <p className="text-2xl font-bold font-mono text-[var(--color-text-primary)]">
+            {totalPlaybooksCount}
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Active Response Catalog</p>
+        </div>
+
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
+          <span className="text-[10px] font-bold text-[var(--color-primary-500)] uppercase tracking-wider block mb-1">
+            Active Rules
+          </span>
+          <p className="text-2xl font-bold font-mono text-[var(--color-primary-500)]">
+            {activeRulesCount}
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Trigger Automation</p>
+        </div>
+
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
+          <span className="text-[10px] font-bold text-[var(--color-medium)] uppercase tracking-wider block mb-1">
+            Pending Approvals
+          </span>
+          <p className="text-2xl font-bold font-mono text-[var(--color-medium)]">
+            {pendingApprovalsCount}
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Requires Review</p>
+        </div>
+
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
+          <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider block mb-1">
+            Executions Today
+          </span>
+          <p className="text-2xl font-bold font-mono text-[var(--color-text-primary)]">
+            {executionsTodayCount}
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">24h Automation Volume</p>
+        </div>
+
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
+          <span className="text-[10px] font-bold text-[var(--color-safe)] uppercase tracking-wider block mb-1">
+            Successful
+          </span>
+          <p className="text-2xl font-bold font-mono text-[var(--color-safe)]">
+            {successfulExecutionsCount}
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium font-mono">Completed Actions</p>
+        </div>
+
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
+          <span className="text-[10px] font-bold text-[var(--color-critical)] uppercase tracking-wider block mb-1">
+            Failed / Halted
+          </span>
+          <p className="text-2xl font-bold font-mono text-[var(--color-critical)]">
+            {failedExecutionsCount}
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Halted Actions</p>
         </div>
       </div>
 
