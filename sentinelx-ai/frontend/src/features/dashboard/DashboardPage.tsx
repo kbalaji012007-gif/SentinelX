@@ -4,20 +4,14 @@ import { Link } from "react-router-dom";
 import {
   FireIcon,
   ExclamationTriangleIcon,
-  ShieldExclamationIcon,
-  ServerIcon,
   BugAntIcon,
-  SparklesIcon,
-  GlobeAmericasIcon,
   ExclamationCircleIcon,
-  ClockIcon,
   ChartBarIcon,
   ArrowRightIcon,
-  ListBulletIcon,
   CpuChipIcon,
-  SignalIcon,
   CheckCircleIcon,
-  XCircleIcon,
+  LinkIcon,
+  ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
 import {
   AreaChart,
@@ -50,21 +44,12 @@ import {
   fetchThreatFeeds,
   fetchIocList,
 } from "../../services/threatIntelligenceService";
-import type { LogEntrySummary } from "../../types/log";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Severity Color Tokens
-// ─────────────────────────────────────────────────────────────────────────────
-
-const LOG_LEVEL_STYLES: Record<string, string> = {
-  CRITICAL: "bg-[var(--color-critical)]/15 text-[var(--color-critical)] border border-[var(--color-critical)]/40",
-  ERROR: "bg-[var(--color-high)]/15 text-[var(--color-high)] border border-[var(--color-high)]/40",
-  WARNING: "bg-[var(--color-medium)]/15 text-[var(--color-medium)] border border-[var(--color-medium)]/40",
-  WARN: "bg-[var(--color-medium)]/15 text-[var(--color-medium)] border border-[var(--color-medium)]/40",
-  INFO: "bg-[var(--color-info)]/15 text-[var(--color-info)] border border-[var(--color-info)]/40",
-  DEBUG: "bg-blue-500/15 text-blue-400 border border-blue-500/30",
-  TRACE: "bg-purple-500/15 text-purple-400 border border-purple-500/30",
-};
+import {
+  fetchCorrelations,
+  fetchCorrelationStats,
+  fetchAttackChains,
+  fetchMitreMappings,
+} from "../../services/correlationService";
 
 export default function DashboardPage() {
   // ── 1. General Dashboard Queries ─────────────────────────────────────────
@@ -78,18 +63,18 @@ export default function DashboardPage() {
     refetchInterval: 30000,
   });
 
-  const { data: stats } = useQuery({
+  useQuery({
     queryKey: ["dashboard-statistics"],
     queryFn: fetchDashboardStatistics,
   });
 
-  const { data: activity, isLoading: isActivityLoading } = useQuery({
+  useQuery({
     queryKey: ["dashboard-recent-activity"],
     queryFn: fetchRecentActivity,
     refetchInterval: 60000,
   });
 
-  const { data: incStats } = useQuery({
+  useQuery({
     queryKey: ["incident-stats"],
     queryFn: fetchIncidentStats,
     refetchInterval: 30000,
@@ -119,7 +104,7 @@ export default function DashboardPage() {
     refetchInterval: 30000,
   });
 
-  const { data: topSources, isLoading: isTopSourcesLoading } = useQuery({
+  useQuery({
     queryKey: ["top-log-sources"],
     queryFn: () => fetchTopLogSources(5),
     refetchInterval: 60000,
@@ -131,38 +116,38 @@ export default function DashboardPage() {
     refetchInterval: 60000,
   });
 
-  const { data: recentLogsData, isLoading: isRecentLogsLoading } = useQuery({
+  useQuery({
     queryKey: ["recent-logs-feed"],
     queryFn: () => fetchLogEntries({ page_size: 5 }),
     refetchInterval: 15000,
   });
 
   // ── 3. Threat Intelligence Live Provider Queries ─────────────────────────
-  const { data: intelStats } = useQuery({
+  useQuery({
     queryKey: ["threat-intel-stats"],
     queryFn: fetchThreatIntelStats,
     refetchInterval: 30000,
   });
 
-  const { data: providerStatusesData } = useQuery({
+  useQuery({
     queryKey: ["provider-statuses"],
     queryFn: fetchProviderStatuses,
     refetchInterval: 30000,
   });
 
-  const { data: cacheTelemetry } = useQuery({
+  useQuery({
     queryKey: ["cache-telemetry"],
     queryFn: fetchCacheStats,
     refetchInterval: 30000,
   });
 
-  const { data: feedsSummary } = useQuery({
+  useQuery({
     queryKey: ["threat-feeds-summary"],
     queryFn: () => fetchThreatFeeds({ page_size: 5 }),
     refetchInterval: 60000,
   });
 
-  const { data: topMaliciousIocsData } = useQuery({
+  useQuery({
     queryKey: ["top-malicious-iocs"],
     queryFn: () => fetchIocList({ severity: "Critical", page_size: 5 }),
     refetchInterval: 30000,
@@ -174,24 +159,34 @@ export default function DashboardPage() {
     refetchInterval: 30000,
   });
 
+  // ── 4. Correlation Engine Queries ─────────────────────────────────────────
+  const { data: corrStats } = useQuery({
+    queryKey: ["correlation-stats"],
+    queryFn: fetchCorrelationStats,
+    refetchInterval: 30000,
+  });
+
+  const { data: recentCorrelationsData } = useQuery({
+    queryKey: ["recent-correlations-summary"],
+    queryFn: () => fetchCorrelations({ page_size: 5 }),
+    refetchInterval: 30000,
+  });
+
+  const { data: attackChainsSummary } = useQuery({
+    queryKey: ["attack-chains-summary"],
+    queryFn: () => fetchAttackChains({ page_size: 5 }),
+    refetchInterval: 30000,
+  });
+
+  const { data: mitreMappingsSummary } = useQuery({
+    queryKey: ["mitre-mappings-summary"],
+    queryFn: () => fetchMitreMappings({ page_size: 5 }),
+    refetchInterval: 30000,
+  });
+
   // ── Computed Log Telemetry Metrics ──────────────────────────────────────
   const totalLogsToday = logStats?.total_entries ?? 0;
-  const criticalLogCount = logStats?.by_level?.CRITICAL ?? 0;
-  const errorLogCount = logStats?.by_level?.ERROR ?? 0;
   const activeLogSourcesCount = logSourcesSummary?.total ?? 0;
-
-  // Compute Logs Last Hour from latest volume bucket
-  const logsLastHour = useMemo(() => {
-    if (!logVolume || logVolume.length === 0) return 0;
-    return logVolume[0]?.count ?? 0;
-  }, [logVolume]);
-
-  // Compute Error Rate (% of ERROR + CRITICAL logs / total logs)
-  const errorRateStr = useMemo(() => {
-    if (!totalLogsToday) return "0.0%";
-    const badCount = criticalLogCount + errorLogCount;
-    return ((badCount / totalLogsToday) * 100).toFixed(1) + "%";
-  }, [totalLogsToday, criticalLogCount, errorLogCount]);
 
   // Format Log Volume Timeline for Recharts AreaChart
   const logVolumeChartData = useMemo(() => {
@@ -204,30 +199,21 @@ export default function DashboardPage() {
     }));
   }, [logVolume]);
 
-
-
-  // Top Sources max count for progress bars
-  const maxSourceCount = useMemo(() => {
-    if (!topSources || !topSources.length) return 1;
-    return Math.max(...topSources.map((s) => s.entry_count));
-  }, [topSources]);
-
   // Summary bindings
   const activeThreats = summary?.active_threats_count ?? 0;
-  const openIncidents = incStats?.open_incidents_count ?? (summary?.open_incidents_count ?? 0);
-  const riskScore = summary?.current_risk_score ?? 10;
   const assetCount = summary?.asset_count ?? 0;
-  const topAttackerIps = stats?.top_attacker_ips ?? [];
-  const activityList = activity ?? [];
-  const recentLogsList: LogEntrySummary[] = recentLogsData?.items ?? [];
 
   // Threat Intelligence bindings
-  const providerList = providerStatusesData?.providers || [];
-  const activeFeedsCount = feedsSummary?.total ?? (intelStats?.active_feeds ?? 0);
-  const totalCachedQueries = cacheTelemetry?.total_cached ?? (intelStats?.cached_query_count ?? 0);
-  const cacheHitRatio = cacheTelemetry?.cache_hit_ratio ?? (intelStats?.cache_hit_ratio ?? 0);
-  const topMaliciousIocs = topMaliciousIocsData?.items || [];
   const recentEnrichments = recentEnrichmentsData?.items || [];
+
+  // Correlation bindings
+  const totalCorrelationsCount = corrStats?.total_correlations ?? 0;
+  const activeAttackChainsCount = corrStats?.active_attack_chains ?? (attackChainsSummary?.total ?? 0);
+  const totalMitreMappingsCount = corrStats?.total_mitre_mappings ?? (mitreMappingsSummary?.total ?? 0);
+  const avgRiskScore = corrStats?.avg_risk_score ?? 50;
+  const avgConfidenceScore = corrStats?.avg_confidence_score ?? 80;
+  const recentCorrelationsList = recentCorrelationsData?.items || [];
+  const attackChainsList = attackChainsSummary?.items || [];
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -254,22 +240,22 @@ export default function DashboardPage() {
             </h1>
           </div>
           <p className="text-xs text-[var(--color-text-secondary)]">
-            Live ingestion monitoring across {assetCount} enterprise assets & {activeLogSourcesCount} active log sources
+            Live correlation across {assetCount} enterprise assets & {activeLogSourcesCount} active log sources
           </p>
         </div>
         <div className="flex items-center gap-3">
           <Link
-            to="/intelligence"
+            to="/correlation"
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--color-primary-500)] text-[var(--color-surface-0)] text-xs font-bold hover:bg-[var(--color-primary-600)] transition-all shadow-lg shadow-[var(--color-primary-500)]/20"
           >
-            <CpuChipIcon className="w-4 h-4" />
-            <span>IOC Lookup Hub</span>
+            <LinkIcon className="w-4 h-4" />
+            <span>Correlation Engine</span>
           </Link>
           <div className="px-4 py-2 rounded-xl bg-[var(--color-surface-300)]/60 border border-[var(--color-border)] flex items-center gap-3">
             <div>
-              <p className="text-[10px] uppercase font-bold text-[var(--color-text-muted)]">Global Risk Score</p>
+              <p className="text-[10px] uppercase font-bold text-[var(--color-text-muted)] font-mono">Global Risk Impact</p>
               <p className="text-lg font-extrabold font-mono text-[var(--color-high)]">
-                {isSummaryLoading ? "..." : `${riskScore} / 100`}
+                {isSummaryLoading ? "..." : `${avgRiskScore} / 100`}
               </p>
             </div>
           </div>
@@ -296,68 +282,74 @@ export default function DashboardPage() {
           <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Telemetry Ingested</p>
         </div>
 
-        {/* Logs Last Hour */}
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-info)]/50 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
-              Last Hour Volume
-            </span>
-            <ClockIcon className="w-4 h-4 text-[var(--color-info)]" />
-          </div>
-          {isLogVolumeLoading ? (
-            <div className="h-8 w-16 skeleton rounded my-1" />
-          ) : (
-            <p className="text-2xl font-bold font-mono text-[var(--color-info)]">
-              {logsLastHour.toLocaleString()}
-            </p>
-          )}
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Recent Velocity</p>
-        </div>
-
-        {/* Error Rate */}
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-high)]/50 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
-              Error Rate
-            </span>
-            <ExclamationTriangleIcon className="w-4 h-4 text-[var(--color-high)]" />
-          </div>
-          {isLogStatsLoading ? (
-            <div className="h-8 w-16 skeleton rounded my-1" />
-          ) : (
-            <p className="text-2xl font-bold font-mono text-[var(--color-high)]">
-              {errorRateStr}
-            </p>
-          )}
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Error & Critical %</p>
-        </div>
-
-        {/* Threat Lookup Count */}
+        {/* Correlated Events Widget */}
         <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-primary-500)]/50 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
-              Threat Lookups
+              Correlations
             </span>
-            <CpuChipIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
+            <LinkIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
           </div>
           <p className="text-2xl font-bold font-mono text-[var(--color-primary-500)]">
-            {totalCachedQueries}
+            {totalCorrelationsCount}
           </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">External Queries</p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Correlated Events</p>
         </div>
 
-        {/* Cache Hit Ratio */}
+        {/* Active Attack Chains */}
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-critical)]/50 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold text-[var(--color-critical)] uppercase tracking-wider">
+              Attack Chains
+            </span>
+            <FireIcon className="w-4 h-4 text-[var(--color-critical)]" />
+          </div>
+          <p className="text-2xl font-bold font-mono text-[var(--color-critical)]">
+            {activeAttackChainsCount}
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Multi-Stage Chains</p>
+        </div>
+
+        {/* MITRE Coverage */}
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-info)]/50 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
+              MITRE Mappings
+            </span>
+            <ShieldCheckIcon className="w-4 h-4 text-[var(--color-info)]" />
+          </div>
+          <p className="text-2xl font-bold font-mono text-[var(--color-info)]">
+            {totalMitreMappingsCount}
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Mapped Techniques</p>
+        </div>
+
+        {/* Risk Trend Impact */}
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-high)]/50 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
+              Risk Score
+            </span>
+            <ExclamationTriangleIcon className="w-4 h-4 text-[var(--color-high)]" />
+          </div>
+          <p className="text-2xl font-bold font-mono text-[var(--color-high)]">
+            {avgRiskScore} <span className="text-xs font-normal text-[var(--color-text-muted)]">/100</span>
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Avg Impact Score</p>
+        </div>
+
+        {/* Certainty Confidence */}
         <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-blue-400/50 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
-              Cache Hit Ratio
+              Confidence
             </span>
-            <ClockIcon className="w-4 h-4 text-blue-400" />
+            <CheckCircleIcon className="w-4 h-4 text-blue-400" />
           </div>
           <p className="text-2xl font-bold font-mono text-blue-400">
-            {cacheHitRatio}%
+            {avgConfidenceScore}%
           </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Cache Telemetry</p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Avg Certainty Level</p>
         </div>
 
         {/* Active Threats */}
@@ -373,137 +365,106 @@ export default function DashboardPage() {
           </p>
           <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Detected Threats</p>
         </div>
-
-        {/* Open Incidents */}
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-medium)]/50 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
-              Open Incidents
-            </span>
-            <ShieldExclamationIcon className="w-4 h-4 text-[var(--color-medium)]" />
-          </div>
-          <p className="text-2xl font-bold font-mono text-[var(--color-text-primary)]">
-            {openIncidents}
-          </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Active Tickets</p>
-        </div>
       </div>
 
-      {/* ── LIVE THREAT INTELLIGENCE INTEGRATION WIDGETS ROW ─────────────────── */}
+      {/* ── LIVE CORRELATION ENGINE WIDGETS ROW ─────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Provider Status Widget */}
-        <div className="glass rounded-xl p-5 border border-[var(--color-border)] flex flex-col justify-between space-y-4">
+        {/* Recent Correlations Widget */}
+        <div className="glass rounded-xl p-5 border border-[var(--color-border)] lg:col-span-2 flex flex-col justify-between space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <SignalIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
+              <LinkIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
               <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
-                External Provider Status
+                Recent Correlated Security Events
               </h2>
             </div>
             <Link
-              to="/intelligence"
-              className="text-xs font-semibold text-[var(--color-primary-500)] hover:underline flex items-center gap-1"
+              to="/correlation"
+              className="text-xs font-semibold text-[var(--color-primary-500)] hover:underline flex items-center gap-1 font-mono"
             >
-              <span>Provider Hub</span>
+              <span>Correlation Engine</span>
               <ArrowRightIcon className="w-3 h-3" />
             </Link>
           </div>
 
           <div className="space-y-2 font-mono text-xs">
-            {providerList.length === 0 ? (
-              <p className="text-xs text-[var(--color-text-muted)]">Checking provider statuses...</p>
+            {recentCorrelationsList.length === 0 ? (
+              <div className="p-6 text-center text-xs text-[var(--color-text-muted)]">
+                No active correlated events recorded yet. Run a correlation pass.
+              </div>
             ) : (
-              providerList.map((p: any) => (
+              recentCorrelationsList.slice(0, 4).map((corr) => (
                 <div
-                  key={p.name}
-                  className="flex items-center justify-between p-2.5 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)]"
+                  key={corr.id}
+                  className="p-3 rounded-xl bg-[var(--color-surface-200)]/60 border border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-[var(--color-text-primary)]">{p.name}</span>
+                  <div className="truncate max-w-md">
+                    <p className="font-bold text-[var(--color-text-primary)] truncate">{corr.title}</p>
+                    <p className="text-[10px] text-[var(--color-text-muted)] mt-0.5">
+                      Type: <strong className="text-[var(--color-primary-500)]">{corr.correlation_type}</strong> • Evidence: {corr.evidence?.rationale || "Multi-source matching"}
+                    </p>
                   </div>
-                  {p.configured ? (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[var(--color-safe)]/20 text-[var(--color-safe)] flex items-center gap-1">
-                      <CheckCircleIcon className="w-3 h-3" /> READY
+
+                  <div className="flex items-center gap-3 shrink-0 text-xs">
+                    <span className="text-[var(--color-critical)] font-bold">
+                      Risk: {corr.risk_score}
                     </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[var(--color-critical)]/20 text-[var(--color-critical)] flex items-center gap-1">
-                      <XCircleIcon className="w-3 h-3" /> UNAVAILABLE
+                    <span className="text-blue-400 font-bold">
+                      Conf: {corr.confidence_score}%
                     </span>
-                  )}
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        corr.severity === "Critical"
+                          ? "bg-[var(--color-critical)]/20 text-[var(--color-critical)]"
+                          : "bg-[var(--color-high)]/20 text-[var(--color-high)]"
+                      }`}
+                    >
+                      {corr.severity}
+                    </span>
+                  </div>
                 </div>
               ))
             )}
           </div>
         </div>
 
-        {/* Threat Feed Health Widget */}
-        <div className="glass rounded-xl p-5 border border-[var(--color-border)] flex flex-col justify-between space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ServerIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
-              <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
-                Threat Feed Health
-              </h2>
-            </div>
-            <span className="text-xs font-bold text-[var(--color-safe)] font-mono">
-              {activeFeedsCount} Feeds Active
-            </span>
-          </div>
-
-          <div className="space-y-2 text-xs">
-            {(feedsSummary?.items || []).slice(0, 3).map((feed: any) => (
-              <div
-                key={feed.id}
-                className="flex items-center justify-between p-2.5 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)] font-mono"
-              >
-                <div>
-                  <p className="font-bold text-[var(--color-text-primary)]">{feed.feed_name}</p>
-                  <p className="text-[10px] text-[var(--color-text-muted)]">{feed.provider} • {feed.total_indicators} IOCs</p>
-                </div>
-                <span className="px-2 py-0.5 rounded text-[10px] bg-[var(--color-safe)]/20 text-[var(--color-safe)] font-bold">
-                  {feed.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Top Malicious IOCs Widget */}
+        {/* Active Attack Chains Widget */}
         <div className="glass rounded-xl p-5 border border-[var(--color-border)] flex flex-col justify-between space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <FireIcon className="w-4 h-4 text-[var(--color-critical)]" />
               <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
-                Top Malicious IOCs
+                Active Attack Chains
               </h2>
             </div>
-            <Link
-              to="/intelligence"
-              className="text-xs font-semibold text-[var(--color-primary-500)] hover:underline flex items-center gap-1"
-            >
-              <span>View All</span>
-              <ArrowRightIcon className="w-3 h-3" />
-            </Link>
+            <span className="text-xs font-bold text-[var(--color-critical)] font-mono">
+              {activeAttackChainsCount} Active
+            </span>
           </div>
 
           <div className="space-y-2 text-xs font-mono">
-            {topMaliciousIocs.length === 0 ? (
+            {attackChainsList.length === 0 ? (
               <div className="p-4 text-center text-xs text-[var(--color-text-muted)]">
-                No critical malicious indicators flagged.
+                No active attack kill chains detected.
               </div>
             ) : (
-              topMaliciousIocs.slice(0, 3).map((ioc: any) => (
+              attackChainsList.slice(0, 3).map((chain) => (
                 <div
-                  key={ioc.id}
-                  className="flex items-center justify-between p-2.5 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)]"
+                  key={chain.id}
+                  className="p-3 rounded-xl bg-[var(--color-surface-200)]/60 border border-[var(--color-border)] space-y-1.5"
                 >
-                  <div className="truncate max-w-[170px]">
-                    <p className="font-bold text-[var(--color-text-primary)] truncate">{ioc.value}</p>
-                    <p className="text-[10px] text-[var(--color-text-muted)]">{ioc.ioc_type} • {ioc.threat_type}</p>
+                  <div className="flex items-center justify-between">
+                    <p className="font-bold text-[var(--color-text-primary)] truncate max-w-[180px]">
+                      {chain.chain_name}
+                    </p>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[var(--color-critical)]/20 text-[var(--color-critical)]">
+                      {chain.severity}
+                    </span>
                   </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[var(--color-critical)]/20 text-[var(--color-critical)]">
-                    {ioc.severity}
-                  </span>
+                  <div className="flex items-center justify-between text-[10px] text-[var(--color-text-muted)]">
+                    <span>Entry: <strong className="text-[var(--color-primary-500)]">{chain.entry_point || "Unknown"}</strong></span>
+                    <span>Stages: <strong className="text-[var(--color-text-primary)]">{chain.stages_json?.length || 0}</strong></span>
+                  </div>
                 </div>
               ))
             )}
@@ -617,234 +578,6 @@ export default function DashboardPage() {
           >
             Launch IOC Lookup Tool →
           </Link>
-        </div>
-      </div>
-
-      {/* ── Secondary Section: Top Log Sources & AI Insights ────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Top Log Sources Widget */}
-        <div className="glass rounded-xl p-5 border border-[var(--color-border)] lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
-                Top Log Sources by Entry Volume
-              </h2>
-              <p className="text-[11px] text-[var(--color-text-muted)]">
-                Highest throughput telemetry feeds in the enterprise
-              </p>
-            </div>
-            <Link
-              to="/logs"
-              className="text-xs font-semibold text-[var(--color-primary-500)] hover:underline flex items-center gap-1"
-            >
-              <span>Manage Sources</span>
-              <ArrowRightIcon className="w-3 h-3" />
-            </Link>
-          </div>
-
-          {isTopSourcesLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((n) => (
-                <div key={n} className="h-10 w-full skeleton rounded-lg" />
-              ))}
-            </div>
-          ) : !topSources?.length ? (
-            <div className="p-8 text-center text-xs font-mono text-[var(--color-text-muted)]">
-              No log sources registered yet.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {topSources.map((source) => {
-                const percent = Math.round((source.entry_count / maxSourceCount) * 100);
-                return (
-                  <div
-                    key={source.source_id}
-                    className="p-3 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)] space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <div className="flex items-center gap-2">
-                        <ServerIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
-                        <span className="font-bold text-[var(--color-text-primary)]">
-                          {source.name}
-                        </span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-[var(--color-surface-300)] text-[var(--color-text-muted)]">
-                          {source.source_type}
-                        </span>
-                      </div>
-                      <span className="font-bold text-[var(--color-text-primary)]">
-                        {source.entry_count.toLocaleString()} logs
-                      </span>
-                    </div>
-                    {/* Progress Bar */}
-                    <div className="w-full h-1.5 bg-[var(--color-surface-300)] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[var(--color-primary-500)] transition-all duration-500"
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* AI Insights & Security Health */}
-        <div className="space-y-6">
-          <div className="glass rounded-xl p-5 border border-[var(--color-secondary-500)]/30 bg-gradient-to-b from-[var(--color-secondary-500)]/5 to-transparent">
-            <div className="flex items-center gap-2 mb-3">
-              <SparklesIcon className="w-5 h-5 text-[var(--color-secondary-500)] animate-pulse" />
-              <h2 className="text-sm font-bold text-[var(--color-text-primary)]">AI Telemetry Insights</h2>
-            </div>
-            <div className="space-y-3 text-xs">
-              <div className="p-3 rounded-lg bg-[var(--color-surface-200)] border border-[var(--color-border)]">
-                <p className="font-semibold text-[var(--color-primary-500)] mb-1">
-                  Log Stream Correlation
-                </p>
-                <p className="text-[var(--color-text-secondary)] text-[11px]">
-                  Ingestion rate for Syslog and Windows Events is operating normally across all connected log agents.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass rounded-xl p-5 border border-[var(--color-border)]">
-            <div className="flex items-center gap-2 mb-3">
-              <GlobeAmericasIcon className="w-4 h-4 text-[var(--color-critical)]" />
-              <h2 className="text-sm font-bold text-[var(--color-text-primary)]">Top Attacker IPs</h2>
-            </div>
-            <div className="space-y-2">
-              {topAttackerIps.slice(0, 3).map((item) => (
-                <div key={item.ip} className="flex items-center justify-between p-2 rounded bg-[var(--color-surface-200)] text-xs font-mono">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-surface-300)] text-[var(--color-text-muted)]">{item.country}</span>
-                    <span className="text-[var(--color-text-primary)]">{item.ip}</span>
-                  </div>
-                  <span className="font-bold text-[var(--color-critical)]">{item.attempts} reqs</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Feeds Row: Recent Log Events & Activity Stream ────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Log Events Live Feed */}
-        <div className="glass rounded-xl p-5 border border-[var(--color-border)]">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <ListBulletIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
-              <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
-                Recent Log Events Stream
-              </h2>
-            </div>
-            <Link
-              to="/logs"
-              className="text-xs font-semibold text-[var(--color-primary-500)] hover:underline flex items-center gap-1"
-            >
-              <span>View All Logs</span>
-              <ArrowRightIcon className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-
-          {isRecentLogsLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <div key={n} className="h-10 w-full skeleton rounded-lg" />
-              ))}
-            </div>
-          ) : !recentLogsList.length ? (
-            <div className="p-8 text-center text-xs font-mono text-[var(--color-text-muted)]">
-              No recent log events available.
-            </div>
-          ) : (
-            <div className="space-y-2 font-mono text-xs">
-              {recentLogsList.map((log) => (
-                <div
-                  key={log.id}
-                  className="p-2.5 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)] hover:bg-[var(--color-surface-200)] transition-all"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                          LOG_LEVEL_STYLES[log.log_level] || LOG_LEVEL_STYLES.INFO
-                        }`}
-                      >
-                        {log.log_level}
-                      </span>
-                      <span className="font-bold text-[var(--color-text-primary)]">
-                        {log.event_type}
-                      </span>
-                      {log.username && (
-                        <span className="text-[11px] text-[var(--color-text-muted)]">
-                          @{log.username}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-[10px] text-[var(--color-text-muted)]">
-                      {new Date(log.event_timestamp).toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <p className="text-[11px] font-sans text-[var(--color-text-secondary)] truncate">
-                    {log.message || "(Raw log payload)"}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* System Activity Feed / Recent Threats */}
-        <div className="glass rounded-xl p-5 border border-[var(--color-border)]">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
-              System Activity & Active Threats
-            </h2>
-            <span className="text-xs font-semibold text-[var(--color-primary-500)] font-mono">
-              LIVE FEED
-            </span>
-          </div>
-
-          {isActivityLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <div key={n} className="h-10 w-full skeleton rounded-lg" />
-              ))}
-            </div>
-          ) : !activityList.length ? (
-            <div className="p-8 text-center text-xs font-mono text-[var(--color-text-muted)]">
-              No active security threats in feed. All systems clear.
-            </div>
-          ) : (
-            <div className="space-y-2 text-xs">
-              {activityList.slice(0, 5).map((t: any) => (
-                <div
-                  key={t.id}
-                  className="p-2.5 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)] flex items-center justify-between"
-                >
-                  <div className="space-y-0.5">
-                    <p className="font-semibold text-[var(--color-text-primary)]">{t.name}</p>
-                    <p className="text-[11px] font-mono text-[var(--color-text-muted)]">
-                      IP: {t.sourceIp || t.source_ip || "—"} • MITRE: {t.mitreId || t.mitre_id || "—"}
-                    </p>
-                  </div>
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      t.severity === "Critical"
-                        ? "bg-[var(--color-critical)]/20 text-[var(--color-critical)]"
-                        : t.severity === "High"
-                        ? "bg-[var(--color-high)]/20 text-[var(--color-high)]"
-                        : "bg-[var(--color-medium)]/20 text-[var(--color-medium)]"
-                    }`}
-                  >
-                    {t.severity}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </div>

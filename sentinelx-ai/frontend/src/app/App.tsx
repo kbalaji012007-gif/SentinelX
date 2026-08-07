@@ -12,6 +12,7 @@ import IncidentsPage from "../features/incidents/IncidentsPage";
 import AssetsPage from "../features/assets/AssetsPage";
 import LogsPage from "../features/logs/LogsPage";
 import IntelligencePage from "../features/intelligence/IntelligencePage";
+import CorrelationPage from "../features/correlation/CorrelationPage";
 import VulnerabilitiesPage from "../features/vulnerabilities/VulnerabilitiesPage";
 import AnalyticsPage from "../features/analytics/AnalyticsPage";
 import ReportsPage from "../features/reports/ReportsPage";
@@ -41,6 +42,7 @@ function App() {
         <Route path="assets" element={<AssetsPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="intelligence" element={<IntelligencePage />} />
+        <Route path="correlation" element={<CorrelationPage />} />
         <Route path="vulnerabilities" element={<VulnerabilitiesPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="reports" element={<ReportsPage />} />

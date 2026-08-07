@@ -83,6 +83,7 @@ from app.api.v1.incidents.router import router as incidents_router
 from app.api.v1.logs.router import router as logs_router
 from app.api.v1.assets.router import router as assets_router
 from app.api.v1.threat_intelligence.router import router as threat_intel_router
+from app.api.v1.correlation.router import router as correlation_router
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
@@ -93,6 +94,7 @@ app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(logs_router, prefix="/api/v1")
 app.include_router(assets_router, prefix="/api/v1")
 app.include_router(threat_intel_router, prefix="/api/v1")
+app.include_router(correlation_router, prefix="/api/v1")
 
 
 @app.get("/", tags=["Health"])
