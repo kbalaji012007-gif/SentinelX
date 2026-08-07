@@ -1,9 +1,10 @@
 """
 SentinelX AI – Alembic Environment Configuration
-Loads SQLAlchemy models and database URL from app config.
+Loads SQLAlchemy models and database URL from app config with SSL connection support.
 """
 
 import asyncio
+import ssl
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -19,6 +20,11 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+# SSL context for Supabase PostgreSQL
+ssl_ctx = ssl.create_default_context()
+ssl_ctx.check_hostname = False
+ssl_ctx.verify_mode = ssl.CERT_NONE
 
 
 def run_migrations_offline() -> None:
@@ -44,13 +50,18 @@ def do_run_migrations(connection):
 
 
 async def run_async_migrations() -> None:
-    """Run migrations asynchronously using asyncpg engine."""
+    """Run migrations asynchronously using asyncpg engine with SSL."""
     configuration = config.get_section(config.config_ini_section, {}) or {}
     configuration["sqlalchemy.url"] = settings.DATABASE_URL
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={
+            "ssl": ssl_ctx,
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+        },
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
@@ -66,4 +77,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-
