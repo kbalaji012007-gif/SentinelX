@@ -21,8 +21,22 @@ from app.services.user_management_service import UserManagementService
 
 router = APIRouter(prefix="/users", tags=["User Management"])
 
-# RBAC Permissions
-_ADMIN_ROLES = ["Super Administrator", "Administrator", "Admin"]
+# RBAC Permission Groups according to Role Matrix:
+# View Users: All authenticated roles
+# Create, Edit, Delete, Reset Password, Enable, Disable: Super Administrator ONLY
+_VIEW_ROLES = [
+    "Super Administrator",
+    "Administrator",
+    "Admin",
+    "SOC Manager",
+    "SOC Analyst",
+    "Analyst",
+    "Threat Hunter",
+    "Incident Responder",
+    "Auditor",
+    "Read Only",
+    "ReadOnly",
+]
 _SUPER_ADMIN_ROLE = ["Super Administrator"]
 
 
@@ -39,7 +53,7 @@ async def list_users(
     page: Annotated[int, Query(ge=1, description="Page number")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Items per page")] = 25,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_ADMIN_ROLES)),
+    current_user: User = Depends(RequireRole(_VIEW_ROLES)),
 ) -> PaginatedUserList:
     """Fetch paginated list of user accounts with search and filters."""
     service = UserManagementService(db)
@@ -52,12 +66,12 @@ async def list_users(
     "",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create New User Account",
+    summary="Create New User Account (Super Administrator Only)",
 )
 async def create_user(
     payload: UserCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_ADMIN_ROLES)),
+    current_user: User = Depends(RequireRole(_SUPER_ADMIN_ROLE)),
 ) -> UserResponse:
     """Create a new user with hashed password and role assignment."""
     service = UserManagementService(db)
@@ -73,7 +87,7 @@ async def create_user(
 async def get_user(
     id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_ADMIN_ROLES)),
+    current_user: User = Depends(RequireRole(_VIEW_ROLES)),
 ) -> UserResponse:
     """Fetch single user account details by ID."""
     service = UserManagementService(db)
@@ -84,13 +98,13 @@ async def get_user(
     "/{id}",
     response_model=UserResponse,
     status_code=status.HTTP_200_OK,
-    summary="Update User Profile / Role",
+    summary="Update User Profile / Role (Super Administrator Only)",
 )
 async def update_user(
     id: UUID,
     payload: UserUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_ADMIN_ROLES)),
+    current_user: User = Depends(RequireRole(_SUPER_ADMIN_ROLE)),
 ) -> UserResponse:
     """Update user profile, active status, or role."""
     service = UserManagementService(db)
@@ -100,12 +114,12 @@ async def update_user(
 @router.delete(
     "/{id}",
     status_code=status.HTTP_200_OK,
-    summary="Delete User Account",
+    summary="Delete User Account (Super Administrator Only)",
 )
 async def delete_user(
     id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_ADMIN_ROLES)),
+    current_user: User = Depends(RequireRole(_SUPER_ADMIN_ROLE)),
 ) -> dict[str, str]:
     """Delete a user account."""
     service = UserManagementService(db)
@@ -115,13 +129,13 @@ async def delete_user(
 @router.post(
     "/{id}/reset-password",
     status_code=status.HTTP_200_OK,
-    summary="Reset User Password",
+    summary="Reset User Password (Super Administrator Only)",
 )
 async def reset_password(
     id: UUID,
     payload: UserResetPassword,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_ADMIN_ROLES)),
+    current_user: User = Depends(RequireRole(_SUPER_ADMIN_ROLE)),
 ) -> dict[str, str]:
     """Reset password for a user using existing bcrypt hashing."""
     service = UserManagementService(db)
@@ -132,12 +146,12 @@ async def reset_password(
     "/{id}/enable",
     response_model=UserResponse,
     status_code=status.HTTP_200_OK,
-    summary="Enable User Account",
+    summary="Enable User Account (Super Administrator Only)",
 )
 async def enable_user(
     id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_ADMIN_ROLES)),
+    current_user: User = Depends(RequireRole(_SUPER_ADMIN_ROLE)),
 ) -> UserResponse:
     """Enable a deactivated user account."""
     service = UserManagementService(db)
@@ -148,12 +162,12 @@ async def enable_user(
     "/{id}/disable",
     response_model=UserResponse,
     status_code=status.HTTP_200_OK,
-    summary="Disable User Account",
+    summary="Disable User Account (Super Administrator Only)",
 )
 async def disable_user(
     id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_ADMIN_ROLES)),
+    current_user: User = Depends(RequireRole(_SUPER_ADMIN_ROLE)),
 ) -> UserResponse:
     """Deactivate/disable a user account."""
     service = UserManagementService(db)

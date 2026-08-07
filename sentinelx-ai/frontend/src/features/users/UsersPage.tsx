@@ -17,6 +17,7 @@ import {
   EyeIcon,
 } from "@heroicons/react/24/outline";
 
+import { useAuth } from "../../contexts/AuthContext";
 import {
   fetchUsers,
   createUser,
@@ -31,6 +32,9 @@ import {
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
+  const { user: currentUser } = useAuth();
+
+  const isSuperAdmin = currentUser?.role?.name === "Super Administrator";
 
   // Filters & Pagination State
   const [search, setSearch] = useState("");
@@ -145,6 +149,7 @@ export default function UsersPage() {
   });
 
   const handleOpenEdit = (user: User) => {
+    if (!isSuperAdmin) return;
     setSelectedUser(user);
     setEditForm({
       first_name: user.first_name,
@@ -206,13 +211,16 @@ export default function UsersPage() {
           </p>
         </div>
 
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--color-primary-500)] text-[var(--color-surface-0)] text-xs font-bold hover:bg-[var(--color-primary-600)] transition-all shadow-lg shadow-[var(--color-primary-500)]/20 shrink-0"
-        >
-          <UserPlusIcon className="w-4 h-4" />
-          <span>Add New User</span>
-        </button>
+        {/* RBAC: Add New User button rendered ONLY for Super Administrator */}
+        {isSuperAdmin && (
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--color-primary-500)] text-[var(--color-surface-0)] text-xs font-bold hover:bg-[var(--color-primary-600)] transition-all shadow-lg shadow-[var(--color-primary-500)]/20 shrink-0"
+          >
+            <UserPlusIcon className="w-4 h-4" />
+            <span>Add New User</span>
+          </button>
+        )}
       </div>
 
       {/* Filter & Search Toolbar */}
@@ -328,47 +336,54 @@ export default function UsersPage() {
                         <button
                           onClick={() => setDrawerUser(user)}
                           title="View Details"
-                          className="p-1.5 rounded bg-[var(--color-surface-200)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                          className="px-2.5 py-1 rounded bg-[var(--color-surface-200)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] font-mono text-[10px] font-bold flex items-center gap-1"
                         >
-                          <EyeIcon className="w-4 h-4" />
+                          <EyeIcon className="w-3.5 h-3.5" />
+                          <span>View Details</span>
                         </button>
-                        <button
-                          onClick={() => handleOpenEdit(user)}
-                          title="Edit User & Role"
-                          className="p-1.5 rounded bg-[var(--color-surface-200)] text-[var(--color-primary-500)] hover:bg-[var(--color-primary-500)]/20"
-                        >
-                          <PencilSquareIcon className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSelectedUser(user);
-                            setShowResetModal(true);
-                          }}
-                          title="Reset Password"
-                          className="p-1.5 rounded bg-[var(--color-surface-200)] text-amber-400 hover:bg-amber-400/20"
-                        >
-                          <KeyIcon className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => toggleStatusMutation.mutate({ id: user.id, active: user.is_active })}
-                          title={user.is_active ? "Disable Account" : "Enable Account"}
-                          className={`p-1.5 rounded bg-[var(--color-surface-200)] ${
-                            user.is_active ? "text-[var(--color-medium)]" : "text-[var(--color-safe)]"
-                          }`}
-                        >
-                          {user.is_active ? <NoSymbolIcon className="w-4 h-4" /> : <CheckCircleIcon className="w-4 h-4" />}
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (window.confirm(`Are you sure you want to delete user ${user.email}?`)) {
-                              deleteMutation.mutate(user.id);
-                            }
-                          }}
-                          title="Delete User"
-                          className="p-1.5 rounded bg-[var(--color-surface-200)] text-[var(--color-critical)] hover:bg-[var(--color-critical)]/20"
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </button>
+
+                        {/* RBAC: Privileged mutation buttons rendered ONLY for Super Administrator */}
+                        {isSuperAdmin && (
+                          <>
+                            <button
+                              onClick={() => handleOpenEdit(user)}
+                              title="Edit User & Role"
+                              className="p-1.5 rounded bg-[var(--color-surface-200)] text-[var(--color-primary-500)] hover:bg-[var(--color-primary-500)]/20"
+                            >
+                              <PencilSquareIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedUser(user);
+                                setShowResetModal(true);
+                              }}
+                              title="Reset Password"
+                              className="p-1.5 rounded bg-[var(--color-surface-200)] text-amber-400 hover:bg-amber-400/20"
+                            >
+                              <KeyIcon className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => toggleStatusMutation.mutate({ id: user.id, active: user.is_active })}
+                              title={user.is_active ? "Disable Account" : "Enable Account"}
+                              className={`p-1.5 rounded bg-[var(--color-surface-200)] ${
+                                user.is_active ? "text-[var(--color-medium)]" : "text-[var(--color-safe)]"
+                              }`}
+                            >
+                              {user.is_active ? <NoSymbolIcon className="w-4 h-4" /> : <CheckCircleIcon className="w-4 h-4" />}
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete user ${user.email}?`)) {
+                                  deleteMutation.mutate(user.id);
+                                }
+                              }}
+                              title="Delete User"
+                              className="p-1.5 rounded bg-[var(--color-surface-200)] text-[var(--color-critical)] hover:bg-[var(--color-critical)]/20"
+                            >
+                              <TrashIcon className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -403,7 +418,7 @@ export default function UsersPage() {
       </div>
 
       {/* Modal 1: Create New User */}
-      {showCreateModal && (
+      {showCreateModal && isSuperAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in font-mono text-xs">
           <div className="w-full max-w-lg bg-[var(--color-surface-100)] rounded-2xl border border-[var(--color-border)] p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-[var(--color-border)]">
@@ -514,7 +529,7 @@ export default function UsersPage() {
       )}
 
       {/* Modal 2: Edit User */}
-      {showEditModal && selectedUser && (
+      {showEditModal && selectedUser && isSuperAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in font-mono text-xs">
           <div className="w-full max-w-lg bg-[var(--color-surface-100)] rounded-2xl border border-[var(--color-border)] p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-[var(--color-border)]">
@@ -584,7 +599,7 @@ export default function UsersPage() {
       )}
 
       {/* Modal 3: Reset Password */}
-      {showResetModal && selectedUser && (
+      {showResetModal && selectedUser && isSuperAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in font-mono text-xs">
           <div className="w-full max-w-sm bg-[var(--color-surface-100)] rounded-2xl border border-[var(--color-border)] p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-[var(--color-border)]">
