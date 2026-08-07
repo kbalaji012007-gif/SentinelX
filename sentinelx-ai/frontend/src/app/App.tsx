@@ -18,6 +18,7 @@ import VulnerabilitiesPage from "../features/vulnerabilities/VulnerabilitiesPage
 import AnalyticsPage from "../features/analytics/AnalyticsPage";
 import ReportsPage from "../features/reports/ReportsPage";
 import AiAssistantPage from "../features/ai-assistant/AiAssistantPage";
+import AISOCPage from "../features/ai-soc/AISOCPage";
 import UsersPage from "../features/users/UsersPage";
 import SettingsPage from "../features/settings/SettingsPage";
 
@@ -49,6 +50,7 @@ function App() {
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="ai-assistant" element={<AiAssistantPage />} />
+        <Route path="ai-soc" element={<AISOCPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

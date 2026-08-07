@@ -71,6 +71,7 @@ export default function Sidebar() {
     { name: "Analytics", href: "/analytics", icon: ChartBarIcon },
     { name: "Reports", href: "/reports", icon: DocumentChartBarIcon },
     { name: "AI Assistant", href: "/ai-assistant", icon: SparklesIcon, highlight: true },
+    { name: "AI SOC Analyst", href: "/ai-soc", icon: SparklesIcon, highlight: true },
     { name: "Users", href: "/users", icon: UsersIcon },
     { name: "Settings", href: "/settings", icon: Cog6ToothIcon },
   ];

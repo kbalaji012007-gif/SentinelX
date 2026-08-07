@@ -40,6 +40,7 @@ from app.models.soar_execution import (
     SOARWebhook,
     SOARNotification,
 )
+from app.models.ai_soc import AIInvestigationHistory, AIThreatHunt
 
 __all__ = [
     "Base",
@@ -78,4 +79,6 @@ __all__ = [
     "SOARConnectorStatus",
     "SOARWebhook",
     "SOARNotification",
+    "AIInvestigationHistory",
+    "AIThreatHunt",
 ]

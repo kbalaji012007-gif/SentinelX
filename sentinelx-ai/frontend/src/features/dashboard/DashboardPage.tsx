@@ -13,6 +13,7 @@ import {
   LinkIcon,
   ShieldCheckIcon,
   BoltIcon,
+  SparklesIcon,
 } from "@heroicons/react/24/outline";
 import {
   AreaChart,
@@ -52,6 +53,11 @@ import {
   fetchMitreMappings,
 } from "../../services/correlationService";
 import { fetchSOARStats, fetchSOARMetrics } from "../../services/soarService";
+import {
+  fetchAIRiskAssessment,
+  fetchAIRecommendations,
+  fetchAIHistory,
+} from "../../services/aiSocService";
 
 export default function DashboardPage() {
   // ── 1. General Dashboard Queries ─────────────────────────────────────────
@@ -199,6 +205,25 @@ export default function DashboardPage() {
     refetchInterval: 15000,
   });
 
+  // ── 6. AI SOC Analyst Queries ───────────────────────────────────────────
+  const { data: aiRisk } = useQuery({
+    queryKey: ["ai-risk-assessment"],
+    queryFn: fetchAIRiskAssessment,
+    refetchInterval: 30000,
+  });
+
+  const { data: aiRecs } = useQuery({
+    queryKey: ["ai-recommendations"],
+    queryFn: fetchAIRecommendations,
+    refetchInterval: 30000,
+  });
+
+  const { data: aiHistory } = useQuery({
+    queryKey: ["ai-history-summary"],
+    queryFn: () => fetchAIHistory(1, 5),
+    refetchInterval: 15000,
+  });
+
   // ── Computed Log Telemetry Metrics ──────────────────────────────────────
   const totalLogsToday = logStats?.total_entries ?? 0;
   const activeLogSourcesCount = logSourcesSummary?.total ?? 0;
@@ -239,6 +264,12 @@ export default function DashboardPage() {
   const rollbacksCount = soarMetrics?.rollbacks_performed ?? 0;
   const pendingApprovalsCount = soarMetrics?.pending_approvals ?? soarStats?.pending_approvals ?? 0;
 
+  // AI SOC bindings
+  const aiBusinessRiskScore = aiRisk?.business_risk_score ?? 78;
+  const aiPredictedSpread = aiRisk?.attack_spread_prediction ?? "Low Risk";
+  const aiHistoryItems = aiHistory?.items || [];
+  const aiPlaybookRecs = aiRecs?.playbook_recommendations || [];
+
   return (
     <div className="space-y-6 animate-fade-in pb-12">
       {/* Error Callout Banner */}
@@ -269,10 +300,17 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <Link
-            to="/soar"
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--color-primary-500)] text-[var(--color-surface-0)] text-xs font-bold hover:bg-[var(--color-primary-600)] transition-all shadow-lg shadow-[var(--color-primary-500)]/20"
+            to="/ai-soc"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[var(--color-primary-500)] to-purple-600 text-[var(--color-surface-0)] text-xs font-bold hover:opacity-90 transition-all shadow-lg shadow-[var(--color-primary-500)]/20"
           >
-            <BoltIcon className="w-4 h-4" />
+            <SparklesIcon className="w-4 h-4" />
+            <span>AI SOC Analyst</span>
+          </Link>
+          <Link
+            to="/soar"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--color-surface-300)] text-[var(--color-text-primary)] text-xs font-bold hover:bg-[var(--color-surface-400)] transition-all border border-[var(--color-border)]"
+          >
+            <BoltIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
             <span>SOAR Engine</span>
           </Link>
           <div className="px-4 py-2 rounded-xl bg-[var(--color-surface-300)]/60 border border-[var(--color-border)] flex items-center gap-3">
@@ -282,6 +320,69 @@ export default function DashboardPage() {
                 {isSummaryLoading ? "..." : `${avgRiskScore} / 100`}
               </p>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── AI SOC Analyst Platform Telemetry Grid ───────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Widget 1: AI Investigation Queue & History */}
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)] space-y-3 font-mono text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-[var(--color-text-primary)] flex items-center gap-2">
+              <SparklesIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
+              <span>AI Investigation Queue</span>
+            </span>
+            <span className="text-[10px] text-[var(--color-primary-500)] font-bold">
+              {aiHistoryItems.length} Active
+            </span>
+          </div>
+          <div className="space-y-2 max-h-40 overflow-y-auto">
+            {aiHistoryItems.map((item, idx) => (
+              <div key={idx} className="p-2.5 rounded-lg bg-[var(--color-surface-200)] border border-[var(--color-border)] space-y-0.5">
+                <div className="flex justify-between text-[10px]">
+                  <span className="font-bold text-[var(--color-primary-500)]">{item.investigation_type}</span>
+                  <span className="text-[var(--color-safe)] font-bold">{item.confidence_score}% Conf</span>
+                </div>
+                <p className="text-[11px] text-[var(--color-text-primary)] truncate">{item.executive_summary}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Widget 2 & 3: Predicted Risks & Top AI Findings */}
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)] space-y-3 font-mono text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-[var(--color-text-primary)] flex items-center gap-2">
+              <ShieldCheckIcon className="w-4 h-4 text-[var(--color-high)]" />
+              <span>Predicted Business Risks</span>
+            </span>
+            <span className="text-[10px] text-[var(--color-high)] font-bold">Score: {aiBusinessRiskScore}/100</span>
+          </div>
+          <div className="p-3 rounded-lg bg-[var(--color-surface-200)] border border-[var(--color-border)] space-y-1">
+            <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase block">Attack Spread Forecast</span>
+            <p className="text-[11px] text-[var(--color-text-primary)] font-sans leading-relaxed">{aiPredictedSpread}</p>
+          </div>
+        </div>
+
+        {/* Widget 4 & 5: AI Recommendations & Threat Hunt Results */}
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)] space-y-3 font-mono text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-[var(--color-text-primary)] flex items-center gap-2">
+              <BoltIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
+              <span>Recommended SOAR Playbooks</span>
+            </span>
+          </div>
+          <div className="space-y-2">
+            {aiPlaybookRecs.map((rec, idx) => (
+              <div key={idx} className="p-2.5 rounded-lg bg-[var(--color-surface-200)] border border-[var(--color-border)] space-y-0.5">
+                <div className="flex justify-between text-[10px]">
+                  <span className="font-bold text-[var(--color-text-primary)]">{rec.playbook_name}</span>
+                  <span className="text-[var(--color-safe)] font-bold">{rec.confidence_score}%</span>
+                </div>
+                <p className="text-[10px] text-[var(--color-text-muted)] truncate">{rec.reason}</p>
+              </div>
+            ))}
           </div>
         </div>
       </div>
