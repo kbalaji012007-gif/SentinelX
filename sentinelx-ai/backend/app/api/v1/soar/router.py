@@ -1,6 +1,6 @@
 """
-SentinelX AI – SOAR Engine API Router
-JWT-protected, RBAC-enforced endpoints for Playbooks, Automation Rules, Executions, Approvals, and SOAR Telemetry Statistics.
+SentinelX AI – SOAR Engine & Automated Response Actions API Router
+JWT-protected, RBAC-enforced endpoints for Playbooks, Action Execution, Dry-Run, Rollback, Connectors, Notifications, and SOAR Telemetry Metrics.
 """
 
 from uuid import UUID
@@ -24,6 +24,16 @@ from app.schemas.soar_schema import (
     ApprovalActionRequest,
     ApprovalListResponse,
     SOARStatsResponse,
+)
+from app.schemas.soar_execution_schema import (
+    ExecutionStepResponse,
+    ExecutionStepListResponse,
+    ExecutionResultResponse,
+    ExecutionResultListResponse,
+    ConnectorStatusListResponse,
+    NotificationListResponse,
+    ExecutionRunOptionsPayload,
+    SOARMetricsResponse,
 )
 from app.services.soar_service import SOARService
 
@@ -78,6 +88,32 @@ async def create_playbook(
         return await service.create_playbook(payload)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post(
+    "/playbooks/{id}/execute",
+    response_model=ExecutionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Execute Playbook (Support Dry-Run & Parameters)",
+)
+async def execute_playbook(
+    id: UUID,
+    payload: ExecutionRunOptionsPayload = ExecutionRunOptionsPayload(),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_WRITERS)),
+) -> ExecutionResponse:
+    """Execute a playbook using action handlers (supports dry-run simulation mode)."""
+    service = SOARService(db)
+    try:
+        operator = f"{current_user.first_name} {current_user.last_name}"
+        return await service.execute_playbook(
+            playbook_id=id,
+            is_dry_run=payload.is_dry_run,
+            trigger_source=f"Analyst {operator}",
+            parameters=payload.parameters,
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.get(
@@ -181,7 +217,7 @@ async def create_rule(
 
 
 # ────────────────────────────────────────────────────────────────────────
-# Execution & Approval Endpoints
+# Execution & Control Endpoints
 # ────────────────────────────────────────────────────────────────────────
 
 @router.get(
@@ -220,6 +256,96 @@ async def trigger_execution(
         return await service.create_execution(payload)
     except KeyError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post(
+    "/executions/{id}/cancel",
+    response_model=ExecutionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Cancel in-progress execution",
+)
+async def cancel_execution(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_WRITERS)),
+) -> ExecutionResponse:
+    """Cancel an in-progress or pending SOAR playbook execution."""
+    service = SOARService(db)
+    try:
+        return await service.cancel_execution(id)
+    except KeyError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post(
+    "/executions/{id}/resume",
+    response_model=ExecutionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Resume execution",
+)
+async def resume_execution(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_WRITERS)),
+) -> ExecutionResponse:
+    """Resume a paused or pending approval execution."""
+    service = SOARService(db)
+    try:
+        return await service.resume_execution(id)
+    except KeyError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post(
+    "/executions/{id}/rollback",
+    response_model=ExecutionStepResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Rollback step action",
+)
+async def rollback_execution_step(
+    id: UUID,
+    step_id: Annotated[UUID, Query(description="Step ID to revert")],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_WRITERS)),
+) -> ExecutionStepResponse:
+    """Revert/rollback a previously executed response action step."""
+    service = SOARService(db)
+    try:
+        return await service.rollback_step(execution_id=id, step_id=step_id)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get(
+    "/executions/{id}/steps",
+    response_model=ExecutionStepListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get execution steps",
+)
+async def get_execution_steps(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> ExecutionStepListResponse:
+    """Fetch execution step timeline for a playbook run."""
+    service = SOARService(db)
+    return await service.get_execution_steps(id)
+
+
+@router.get(
+    "/executions/{id}/results",
+    response_model=ExecutionResultListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get step execution results",
+)
+async def get_execution_results(
+    id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> ExecutionResultListResponse:
+    """Fetch step execution telemetry results."""
+    service = SOARService(db)
+    return await service.get_execution_results(id)
 
 
 @router.post(
@@ -280,6 +406,57 @@ async def list_approvals(
     """List manual approval requests."""
     service = SOARService(db)
     return await service.list_approvals(page=page, page_size=page_size, status=status_filter)
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Connectors, Notifications & Metrics Endpoints
+# ────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/connectors",
+    response_model=ConnectorStatusListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Connector Health Telemetry",
+)
+async def get_connectors_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> ConnectorStatusListResponse:
+    """Retrieve integration connector health statuses."""
+    service = SOARService(db)
+    return await service.list_connectors()
+
+
+@router.get(
+    "/notifications",
+    response_model=NotificationListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List Notification History",
+)
+async def list_notifications(
+    page: Annotated[int, Query(ge=1, description="Page number")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, description="Items per page")] = 25,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> NotificationListResponse:
+    """Retrieve SOAR notification audit logs."""
+    service = SOARService(db)
+    return await service.list_notifications(page=page, page_size=page_size)
+
+
+@router.get(
+    "/metrics",
+    response_model=SOARMetricsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Advanced SOAR Execution Metrics",
+)
+async def get_soar_metrics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> SOARMetricsResponse:
+    """Retrieve advanced execution metrics for SOAR dashboard widgets."""
+    service = SOARService(db)
+    return await service.execution_metrics()
 
 
 @router.get(

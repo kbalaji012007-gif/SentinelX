@@ -98,6 +98,65 @@ export interface ApprovalListResponse {
   items: SOARApprovalRequest[];
 }
 
+export interface ConnectorStatus {
+  id: string;
+  connector_name: string;
+  connector_type: string;
+  status: "Online" | "Offline" | "Degraded" | "Unavailable";
+  last_heartbeat: string;
+  details: Record<string, any>;
+}
+
+export interface ConnectorListResponse {
+  total: number;
+  items: ConnectorStatus[];
+}
+
+export interface NotificationLog {
+  id: string;
+  channel: string;
+  recipient: string;
+  subject?: string | null;
+  message_body: string;
+  status: string;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  items: NotificationLog[];
+}
+
+export interface ExecutionStep {
+  id: string;
+  execution_id: string;
+  step_id?: string | null;
+  step_name: string;
+  action_type: string;
+  status: string;
+  is_dry_run: boolean;
+  parameters: Record<string, any>;
+  created_at: string;
+}
+
+export interface ExecutionStepListResponse {
+  total: number;
+  items: ExecutionStep[];
+}
+
+export interface SOARMetricsResponse {
+  running_playbooks: number;
+  successful_executions: number;
+  failed_executions: number;
+  average_execution_time_ms: number;
+  connector_health: Record<string, number>;
+  notifications_sent: number;
+  rollbacks_performed: number;
+  pending_approvals: number;
+}
+
 export interface SOARStatsResponse {
   total_playbooks: number;
   active_rules: number;
@@ -125,13 +184,34 @@ export async function createPlaybook(payload: any): Promise<SOARPlaybook> {
   return data;
 }
 
-export async function updatePlaybook(id: string, payload: any): Promise<SOARPlaybook> {
-  const { data } = await apiClient.put<SOARPlaybook>(`/soar/playbooks/${id}`, payload);
+export async function executePlaybook(id: string, isDryRun = false, parameters: Record<string, any> = {}): Promise<SOARExecution> {
+  const { data } = await apiClient.post<SOARExecution>(`/soar/playbooks/${id}/execute`, {
+    is_dry_run: isDryRun,
+    parameters,
+  });
   return data;
 }
 
-export async function deletePlaybook(id: string): Promise<void> {
-  await apiClient.delete(`/soar/playbooks/${id}`);
+export async function cancelExecution(id: string): Promise<SOARExecution> {
+  const { data } = await apiClient.post<SOARExecution>(`/soar/executions/${id}/cancel`);
+  return data;
+}
+
+export async function resumeExecution(id: string): Promise<SOARExecution> {
+  const { data } = await apiClient.post<SOARExecution>(`/soar/executions/${id}/resume`);
+  return data;
+}
+
+export async function rollbackStep(executionId: string, stepId: string): Promise<ExecutionStep> {
+  const { data } = await apiClient.post<ExecutionStep>(`/soar/executions/${executionId}/rollback`, null, {
+    params: { step_id: stepId },
+  });
+  return data;
+}
+
+export async function fetchExecutionSteps(executionId: string): Promise<ExecutionStepListResponse> {
+  const { data } = await apiClient.get<ExecutionStepListResponse>(`/soar/executions/${executionId}/steps`);
+  return data;
 }
 
 export async function fetchSOARRules(params?: any): Promise<RuleListResponse> {
@@ -139,18 +219,8 @@ export async function fetchSOARRules(params?: any): Promise<RuleListResponse> {
   return data;
 }
 
-export async function createSOARRule(payload: any): Promise<SOARRule> {
-  const { data } = await apiClient.post<SOARRule>("/soar/rules", payload);
-  return data;
-}
-
 export async function fetchSOARExecutions(params?: any): Promise<ExecutionListResponse> {
   const { data } = await apiClient.get<ExecutionListResponse>("/soar/executions", { params });
-  return data;
-}
-
-export async function triggerExecution(payload: any): Promise<SOARExecution> {
-  const { data } = await apiClient.post<SOARExecution>("/soar/executions", payload);
   return data;
 }
 
@@ -166,6 +236,21 @@ export async function rejectExecution(id: string, reason?: string): Promise<SOAR
 
 export async function fetchSOARApprovals(params?: any): Promise<ApprovalListResponse> {
   const { data } = await apiClient.get<ApprovalListResponse>("/soar/approvals", { params });
+  return data;
+}
+
+export async function fetchConnectorsStatus(): Promise<ConnectorListResponse> {
+  const { data } = await apiClient.get<ConnectorListResponse>("/soar/connectors");
+  return data;
+}
+
+export async function fetchNotificationLogs(params?: any): Promise<NotificationListResponse> {
+  const { data } = await apiClient.get<NotificationListResponse>("/soar/notifications", { params });
+  return data;
+}
+
+export async function fetchSOARMetrics(): Promise<SOARMetricsResponse> {
+  const { data } = await apiClient.get<SOARMetricsResponse>("/soar/metrics");
   return data;
 }
 

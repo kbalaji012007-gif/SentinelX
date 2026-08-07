@@ -1,6 +1,6 @@
 """
 SentinelX AI – Models Package
-Exposes Base, Role, User, AssetGroup, Asset, Threat, Alert, IOC, Log, ThreatIntelligence, Correlation, and SOAR ORM models.
+Exposes Base, Role, User, AssetGroup, Asset, Threat, Alert, IOC, Log, ThreatIntelligence, Correlation, and SOAR Engine ORM models.
 """
 
 from app.models.base import Base, TimestampMixin
@@ -31,6 +31,14 @@ from app.models.soar import (
     SOARExecution,
     SOARExecutionLog,
     SOARApprovalRequest,
+)
+from app.models.soar_execution import (
+    SOARResponseAction,
+    SOARExecutionStep,
+    SOARExecutionResult,
+    SOARConnectorStatus,
+    SOARWebhook,
+    SOARNotification,
 )
 
 __all__ = [
@@ -64,4 +72,10 @@ __all__ = [
     "SOARExecution",
     "SOARExecutionLog",
     "SOARApprovalRequest",
+    "SOARResponseAction",
+    "SOARExecutionStep",
+    "SOARExecutionResult",
+    "SOARConnectorStatus",
+    "SOARWebhook",
+    "SOARNotification",
 ]

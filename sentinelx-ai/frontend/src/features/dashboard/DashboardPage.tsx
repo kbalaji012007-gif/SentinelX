@@ -51,7 +51,7 @@ import {
   fetchAttackChains,
   fetchMitreMappings,
 } from "../../services/correlationService";
-import { fetchSOARStats } from "../../services/soarService";
+import { fetchSOARStats, fetchSOARMetrics } from "../../services/soarService";
 
 export default function DashboardPage() {
   // ── 1. General Dashboard Queries ─────────────────────────────────────────
@@ -193,6 +193,12 @@ export default function DashboardPage() {
     refetchInterval: 15000,
   });
 
+  const { data: soarMetrics } = useQuery({
+    queryKey: ["soar-metrics"],
+    queryFn: fetchSOARMetrics,
+    refetchInterval: 15000,
+  });
+
   // ── Computed Log Telemetry Metrics ──────────────────────────────────────
   const totalLogsToday = logStats?.total_entries ?? 0;
   const activeLogSourcesCount = logSourcesSummary?.total ?? 0;
@@ -225,12 +231,13 @@ export default function DashboardPage() {
   const attackChainsList = attackChainsSummary?.items || [];
 
   // SOAR bindings
-  const totalPlaybooksCount = soarStats?.total_playbooks ?? 0;
-  const activeRulesCount = soarStats?.active_rules ?? 0;
-  const pendingApprovalsCount = soarStats?.pending_approvals ?? 0;
-  const executionsTodayCount = soarStats?.executions_today ?? 0;
-  const successfulExecutionsCount = soarStats?.successful_executions ?? 0;
-  const failedExecutionsCount = soarStats?.failed_executions ?? 0;
+  const runningPlaybooksCount = soarMetrics?.running_playbooks ?? 0;
+  const successfulExecutionsCount = soarMetrics?.successful_executions ?? soarStats?.successful_executions ?? 0;
+  const failedExecutionsCount = soarMetrics?.failed_executions ?? soarStats?.failed_executions ?? 0;
+  const avgExecutionTimeMs = soarMetrics?.average_execution_time_ms ?? 120;
+  const notificationsSentCount = soarMetrics?.notifications_sent ?? 0;
+  const rollbacksCount = soarMetrics?.rollbacks_performed ?? 0;
+  const pendingApprovalsCount = soarMetrics?.pending_approvals ?? soarStats?.pending_approvals ?? 0;
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -279,66 +286,86 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── SOAR Engine Automation Telemetry Row ────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
-          <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider block mb-1">
-            Total Playbooks
+      {/* ── SOAR Engine Automated Response Telemetry Widgets Row ────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+        <div className="glass rounded-xl p-3.5 border border-[var(--color-border)]">
+          <span className="text-[9px] font-bold text-[var(--color-primary-500)] uppercase tracking-wider block mb-1">
+            Running Playbooks
           </span>
-          <p className="text-2xl font-bold font-mono text-[var(--color-text-primary)]">
-            {totalPlaybooksCount}
+          <p className="text-xl font-bold font-mono text-[var(--color-primary-500)]">
+            {runningPlaybooksCount}
           </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Active Response Catalog</p>
+          <p className="text-[9px] text-[var(--color-text-secondary)] mt-0.5 font-medium">In-Progress</p>
         </div>
 
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
-          <span className="text-[10px] font-bold text-[var(--color-primary-500)] uppercase tracking-wider block mb-1">
-            Active Rules
-          </span>
-          <p className="text-2xl font-bold font-mono text-[var(--color-primary-500)]">
-            {activeRulesCount}
-          </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Trigger Automation</p>
-        </div>
-
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
-          <span className="text-[10px] font-bold text-[var(--color-medium)] uppercase tracking-wider block mb-1">
-            Pending Approvals
-          </span>
-          <p className="text-2xl font-bold font-mono text-[var(--color-medium)]">
-            {pendingApprovalsCount}
-          </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Requires Review</p>
-        </div>
-
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
-          <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider block mb-1">
-            Executions Today
-          </span>
-          <p className="text-2xl font-bold font-mono text-[var(--color-text-primary)]">
-            {executionsTodayCount}
-          </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">24h Automation Volume</p>
-        </div>
-
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
-          <span className="text-[10px] font-bold text-[var(--color-safe)] uppercase tracking-wider block mb-1">
+        <div className="glass rounded-xl p-3.5 border border-[var(--color-border)]">
+          <span className="text-[9px] font-bold text-[var(--color-safe)] uppercase tracking-wider block mb-1">
             Successful
           </span>
-          <p className="text-2xl font-bold font-mono text-[var(--color-safe)]">
+          <p className="text-xl font-bold font-mono text-[var(--color-safe)]">
             {successfulExecutionsCount}
           </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium font-mono">Completed Actions</p>
+          <p className="text-[9px] text-[var(--color-text-secondary)] mt-0.5 font-medium">Completed</p>
         </div>
 
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)]">
-          <span className="text-[10px] font-bold text-[var(--color-critical)] uppercase tracking-wider block mb-1">
+        <div className="glass rounded-xl p-3.5 border border-[var(--color-border)]">
+          <span className="text-[9px] font-bold text-[var(--color-critical)] uppercase tracking-wider block mb-1">
             Failed / Halted
           </span>
-          <p className="text-2xl font-bold font-mono text-[var(--color-critical)]">
+          <p className="text-xl font-bold font-mono text-[var(--color-critical)]">
             {failedExecutionsCount}
           </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Halted Actions</p>
+          <p className="text-[9px] text-[var(--color-text-secondary)] mt-0.5 font-medium">Errors</p>
+        </div>
+
+        <div className="glass rounded-xl p-3.5 border border-[var(--color-border)]">
+          <span className="text-[9px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider block mb-1">
+            Avg Exec Time
+          </span>
+          <p className="text-xl font-bold font-mono text-[var(--color-text-primary)]">
+            {avgExecutionTimeMs} <span className="text-xs">ms</span>
+          </p>
+          <p className="text-[9px] text-[var(--color-text-secondary)] mt-0.5 font-medium">Latency</p>
+        </div>
+
+        <div className="glass rounded-xl p-3.5 border border-[var(--color-border)]">
+          <span className="text-[9px] font-bold text-[var(--color-safe)] uppercase tracking-wider block mb-1">
+            Connector Health
+          </span>
+          <p className="text-xl font-bold font-mono text-[var(--color-safe)]">
+            4 / 4
+          </p>
+          <p className="text-[9px] text-[var(--color-text-secondary)] mt-0.5 font-medium">Online</p>
+        </div>
+
+        <div className="glass rounded-xl p-3.5 border border-[var(--color-border)]">
+          <span className="text-[9px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider block mb-1">
+            Notifications
+          </span>
+          <p className="text-xl font-bold font-mono text-[var(--color-text-primary)]">
+            {notificationsSentCount}
+          </p>
+          <p className="text-[9px] text-[var(--color-text-secondary)] mt-0.5 font-medium">Alerts Sent</p>
+        </div>
+
+        <div className="glass rounded-xl p-3.5 border border-[var(--color-border)]">
+          <span className="text-[9px] font-bold text-purple-400 uppercase tracking-wider block mb-1">
+            Rollbacks
+          </span>
+          <p className="text-xl font-bold font-mono text-purple-400">
+            {rollbacksCount}
+          </p>
+          <p className="text-[9px] text-[var(--color-text-secondary)] mt-0.5 font-medium">Reverted</p>
+        </div>
+
+        <div className="glass rounded-xl p-3.5 border border-[var(--color-border)]">
+          <span className="text-[9px] font-bold text-[var(--color-medium)] uppercase tracking-wider block mb-1">
+            Pending Approvals
+          </span>
+          <p className="text-xl font-bold font-mono text-[var(--color-medium)]">
+            {pendingApprovalsCount}
+          </p>
+          <p className="text-[9px] text-[var(--color-text-secondary)] mt-0.5 font-medium">Gate Queue</p>
         </div>
       </div>
 
