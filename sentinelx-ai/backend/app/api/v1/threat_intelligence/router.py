@@ -1,6 +1,6 @@
 """
 SentinelX AI – Threat Intelligence API Router
-JWT-protected, RBAC-enforced endpoints for threat feeds, IOCs, MITRE ATT&CK techniques, and intelligence statistics.
+JWT-protected, RBAC-enforced endpoints for threat feeds, IOCs, MITRE ATT&CK techniques, statistics, external provider lookups, AI summaries, and cache status.
 """
 
 from uuid import UUID
@@ -19,6 +19,12 @@ from app.schemas.threat_intelligence_schema import (
     IOCFeedListResponse,
     MitreTechniqueListResponse,
     ThreatIntelStatsResponse,
+    IOCLookupRequest,
+    IOCEnrichRequest,
+    AISummaryRequest,
+    IOCLookupResponse,
+    ProviderStatusListResponse,
+    CacheStatsResponse,
 )
 from app.services.threat_intelligence_service import ThreatIntelService
 
@@ -116,6 +122,159 @@ async def create_ioc(
     """Add a new Indicator of Compromise to the threat intelligence engine."""
     service = ThreatIntelService(db)
     return await service.create_ioc(payload)
+
+
+# ────────────────────────────────────────────────────────────────────────
+# External Threat Intelligence Provider Lookups
+# ────────────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/lookup/ip",
+    response_model=IOCLookupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Query external providers for IP reputation",
+)
+async def lookup_ip_address(
+    payload: IOCLookupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> IOCLookupResponse:
+    """Lookup IP address across VirusTotal, AbuseIPDB, Shodan, and Gemini AI."""
+    service = ThreatIntelService(db)
+    return await service.lookup_ip(ip=payload.value, force_refresh=payload.force_refresh)
+
+
+@router.post(
+    "/lookup/domain",
+    response_model=IOCLookupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Query external providers for Domain reputation",
+)
+async def lookup_domain_name(
+    payload: IOCLookupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> IOCLookupResponse:
+    """Lookup Domain across VirusTotal and Gemini AI."""
+    service = ThreatIntelService(db)
+    return await service.lookup_domain(domain=payload.value, force_refresh=payload.force_refresh)
+
+
+@router.post(
+    "/lookup/url",
+    response_model=IOCLookupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Query external providers for URL reputation",
+)
+async def lookup_url_link(
+    payload: IOCLookupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> IOCLookupResponse:
+    """Lookup URL link across VirusTotal and Gemini AI."""
+    service = ThreatIntelService(db)
+    return await service.lookup_url(url=payload.value, force_refresh=payload.force_refresh)
+
+
+@router.post(
+    "/lookup/hash",
+    response_model=IOCLookupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Query external providers for File Hash reputation",
+)
+async def lookup_file_hash(
+    payload: IOCLookupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> IOCLookupResponse:
+    """Lookup File Hash (MD5, SHA-1, SHA-256) across VirusTotal and Gemini AI."""
+    service = ThreatIntelService(db)
+    return await service.lookup_hash(file_hash=payload.value, force_refresh=payload.force_refresh)
+
+
+@router.post(
+    "/lookup/host",
+    response_model=IOCLookupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Query external providers for Host details",
+)
+async def lookup_host_details(
+    payload: IOCLookupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> IOCLookupResponse:
+    """Lookup Host details across Shodan, VirusTotal, and Gemini AI."""
+    service = ThreatIntelService(db)
+    return await service.lookup_host(host=payload.value, force_refresh=payload.force_refresh)
+
+
+@router.post(
+    "/enrich",
+    response_model=IOCLookupResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Enrich IOC with live external provider analysis & AI synthesis",
+)
+async def enrich_ioc_indicator(
+    payload: IOCEnrichRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> IOCLookupResponse:
+    """Generic IOC enrichment endpoint for any indicator type."""
+    service = ThreatIntelService(db)
+    return await service.enrich_ioc(
+        ioc_type=payload.ioc_type,
+        value=payload.value,
+        force_refresh=payload.force_refresh,
+    )
+
+
+@router.post(
+    "/ai-summary",
+    status_code=status.HTTP_200_OK,
+    summary="Generate AI threat summary and MITRE explanation",
+)
+async def generate_ai_summary(
+    payload: AISummaryRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+):
+    """Generate Gemini AI threat summary, explanation, and MITRE mapping."""
+    service = ThreatIntelService(db)
+    return await service.generate_ai_summary(
+        ioc_type=payload.ioc_type,
+        value=payload.value,
+        context=payload.context,
+    )
+
+
+@router.get(
+    "/providers",
+    response_model=ProviderStatusListResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List external provider readiness & configuration status",
+)
+async def list_providers_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> ProviderStatusListResponse:
+    """Retrieve configuration readiness and supported types for all external providers."""
+    service = ThreatIntelService(db)
+    return await service.get_provider_statuses()
+
+
+@router.get(
+    "/cache",
+    response_model=CacheStatsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Threat Intelligence cache telemetry & hit ratio",
+)
+async def get_cache_telemetry(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(RequireRole(_READERS)),
+) -> CacheStatsResponse:
+    """Retrieve cache hit statistics, entry counts, and recent query keys."""
+    service = ThreatIntelService(db)
+    return await service.get_cache_stats()
 
 
 # ────────────────────────────────────────────────────────────────────────

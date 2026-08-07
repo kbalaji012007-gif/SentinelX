@@ -298,3 +298,24 @@ class ThreatCacheRepository(BaseRepository[ThreatCache]):
             select(ThreatCache).where(ThreatCache.query_key == query_key)
         )
         return result.scalar_one_or_none()
+
+    async def count_total_cache(self) -> int:
+        """Count total cache entries."""
+        result = await self.session.execute(select(func.count(ThreatCache.id)))
+        return result.scalar() or 0
+
+    async def count_valid_cache(self) -> int:
+        """Count valid unexpired cache entries."""
+        now = datetime.now(timezone.utc)
+        result = await self.session.execute(
+            select(func.count(ThreatCache.id)).where(ThreatCache.expires_at > now)
+        )
+        return result.scalar() or 0
+
+    async def list_recent_cache_entries(self, limit: int = 20) -> Sequence[ThreatCache]:
+        """List recently stored cache entries."""
+        result = await self.session.execute(
+            select(ThreatCache).order_by(ThreatCache.created_at.desc()).limit(limit)
+        )
+        return result.scalars().all()
+

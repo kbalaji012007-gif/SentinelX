@@ -254,3 +254,84 @@ class ThreatIntelStatsResponse(BaseModel):
     iocs_by_severity: dict[str, int]
     mitre_technique_count: int
     cached_query_count: int
+    cache_hit_ratio: float = 0.0
+
+
+# ────────────────────────────────────────────────────────────────────────
+# External Provider Lookup & Enrichment Schemas
+# ────────────────────────────────────────────────────────────────────────
+
+class IOCLookupRequest(BaseModel):
+    """Schema for single value IOC lookup."""
+
+    value: str = Field(..., min_length=1, max_length=500)
+    force_refresh: bool = False
+
+
+class IOCEnrichRequest(BaseModel):
+    """Schema for enriching an IOC with providers and AI analysis."""
+
+    ioc_type: IOCTypeEnum
+    value: str = Field(..., min_length=1, max_length=500)
+    force_refresh: bool = False
+
+
+class AISummaryRequest(BaseModel):
+    """Schema for generating AI threat summary on IOC."""
+
+    ioc_type: IOCTypeEnum
+    value: str = Field(..., min_length=1, max_length=500)
+    context: dict[str, Any] | None = None
+
+
+class ProviderResultItem(BaseModel):
+    """Schema for individual external provider response."""
+
+    provider: str
+    status: Literal["available", "unavailable", "not_found"]
+    reason: str | None = None
+    data: dict[str, Any] | None = None
+
+
+class IOCLookupResponse(BaseModel):
+    """Aggregated threat intelligence lookup response across all providers."""
+
+    ioc_value: str
+    ioc_type: str
+    verdict: VerdictEnum = "Unknown"
+    threat_score: int = Field(0, ge=0, le=100)
+    confidence: int = Field(80, ge=0, le=100)
+    reputation: str = "Unknown"
+    cache_hit: bool = False
+    cached_at: datetime | None = None
+    expires_at: datetime | None = None
+    providers: dict[str, ProviderResultItem] = Field(default_factory=dict)
+    gemini_summary: dict[str, Any] | None = None
+    mitre_mapping: list[dict[str, Any]] = Field(default_factory=list)
+    timeline: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProviderStatusItem(BaseModel):
+    """Configuration and availability status of external provider."""
+
+    name: str
+    configured: bool
+    status: Literal["ready", "unavailable"]
+    reason: str | None = None
+    supported_types: list[str] = Field(default_factory=list)
+
+
+class ProviderStatusListResponse(BaseModel):
+    """List of all external threat intelligence provider statuses."""
+
+    providers: list[ProviderStatusItem]
+
+
+class CacheStatsResponse(BaseModel):
+    """Threat intelligence cache telemetry statistics."""
+
+    total_cached: int
+    active_cached: int
+    cache_hit_ratio: float
+    recent_keys: list[str] = Field(default_factory=list)
+

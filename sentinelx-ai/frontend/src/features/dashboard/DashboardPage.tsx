@@ -10,11 +10,14 @@ import {
   SparklesIcon,
   GlobeAmericasIcon,
   ExclamationCircleIcon,
-  Bars3BottomLeftIcon,
   ClockIcon,
   ChartBarIcon,
   ArrowRightIcon,
   ListBulletIcon,
+  CpuChipIcon,
+  SignalIcon,
+  CheckCircleIcon,
+  XCircleIcon,
 } from "@heroicons/react/24/outline";
 import {
   AreaChart,
@@ -24,9 +27,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
 } from "recharts";
 
 import {
@@ -43,6 +43,13 @@ import {
   fetchLogSources,
   fetchLogEntries,
 } from "../../services/logService";
+import {
+  fetchThreatIntelStats,
+  fetchProviderStatuses,
+  fetchCacheStats,
+  fetchThreatFeeds,
+  fetchIocList,
+} from "../../services/threatIntelligenceService";
 import type { LogEntrySummary } from "../../types/log";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,6 +137,43 @@ export default function DashboardPage() {
     refetchInterval: 15000,
   });
 
+  // ── 3. Threat Intelligence Live Provider Queries ─────────────────────────
+  const { data: intelStats } = useQuery({
+    queryKey: ["threat-intel-stats"],
+    queryFn: fetchThreatIntelStats,
+    refetchInterval: 30000,
+  });
+
+  const { data: providerStatusesData } = useQuery({
+    queryKey: ["provider-statuses"],
+    queryFn: fetchProviderStatuses,
+    refetchInterval: 30000,
+  });
+
+  const { data: cacheTelemetry } = useQuery({
+    queryKey: ["cache-telemetry"],
+    queryFn: fetchCacheStats,
+    refetchInterval: 30000,
+  });
+
+  const { data: feedsSummary } = useQuery({
+    queryKey: ["threat-feeds-summary"],
+    queryFn: () => fetchThreatFeeds({ page_size: 5 }),
+    refetchInterval: 60000,
+  });
+
+  const { data: topMaliciousIocsData } = useQuery({
+    queryKey: ["top-malicious-iocs"],
+    queryFn: () => fetchIocList({ severity: "Critical", page_size: 5 }),
+    refetchInterval: 30000,
+  });
+
+  const { data: recentEnrichmentsData } = useQuery({
+    queryKey: ["recent-ioc-enrichments"],
+    queryFn: () => fetchIocList({ page_size: 5 }),
+    refetchInterval: 30000,
+  });
+
   // ── Computed Log Telemetry Metrics ──────────────────────────────────────
   const totalLogsToday = logStats?.total_entries ?? 0;
   const criticalLogCount = logStats?.by_level?.CRITICAL ?? 0;
@@ -160,20 +204,7 @@ export default function DashboardPage() {
     }));
   }, [logVolume]);
 
-  // Format Log Severity Distribution for Recharts PieChart
-  const logSeverityPieData = useMemo(() => {
-    if (!logStats?.by_level) return [];
-    const levels = logStats.by_level;
-    const items = [
-      { name: "CRITICAL", value: levels.CRITICAL || 0, color: "var(--color-critical)" },
-      { name: "ERROR", value: levels.ERROR || 0, color: "var(--color-high)" },
-      { name: "WARNING", value: (levels.WARNING || levels.WARN || 0), color: "var(--color-medium)" },
-      { name: "INFO", value: levels.INFO || 0, color: "var(--color-info)" },
-      { name: "DEBUG", value: levels.DEBUG || 0, color: "#3b82f6" },
-      { name: "TRACE", value: levels.TRACE || 0, color: "#a855f7" },
-    ];
-    return items.filter((i) => i.value > 0);
-  }, [logStats]);
+
 
   // Top Sources max count for progress bars
   const maxSourceCount = useMemo(() => {
@@ -189,6 +220,14 @@ export default function DashboardPage() {
   const topAttackerIps = stats?.top_attacker_ips ?? [];
   const activityList = activity ?? [];
   const recentLogsList: LogEntrySummary[] = recentLogsData?.items ?? [];
+
+  // Threat Intelligence bindings
+  const providerList = providerStatusesData?.providers || [];
+  const activeFeedsCount = feedsSummary?.total ?? (intelStats?.active_feeds ?? 0);
+  const totalCachedQueries = cacheTelemetry?.total_cached ?? (intelStats?.cached_query_count ?? 0);
+  const cacheHitRatio = cacheTelemetry?.cache_hit_ratio ?? (intelStats?.cache_hit_ratio ?? 0);
+  const topMaliciousIocs = topMaliciousIocsData?.items || [];
+  const recentEnrichments = recentEnrichmentsData?.items || [];
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -220,11 +259,11 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <Link
-            to="/logs"
+            to="/intelligence"
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--color-primary-500)] text-[var(--color-surface-0)] text-xs font-bold hover:bg-[var(--color-primary-600)] transition-all shadow-lg shadow-[var(--color-primary-500)]/20"
           >
-            <Bars3BottomLeftIcon className="w-4 h-4" />
-            <span>Open Log Viewer</span>
+            <CpuChipIcon className="w-4 h-4" />
+            <span>IOC Lookup Hub</span>
           </Link>
           <div className="px-4 py-2 rounded-xl bg-[var(--color-surface-300)]/60 border border-[var(--color-border)] flex items-center gap-3">
             <div>
@@ -293,36 +332,32 @@ export default function DashboardPage() {
           <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Error & Critical %</p>
         </div>
 
-        {/* Critical Events */}
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-critical)]/50 transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-bold text-[var(--color-critical)] uppercase tracking-wider">
-              Critical Logs
-            </span>
-            <FireIcon className="w-4 h-4 text-[var(--color-critical)]" />
-          </div>
-          {isLogStatsLoading ? (
-            <div className="h-8 w-16 skeleton rounded my-1" />
-          ) : (
-            <p className="text-2xl font-bold font-mono text-[var(--color-critical)]">
-              {criticalLogCount.toLocaleString()}
-            </p>
-          )}
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Requires Inspection</p>
-        </div>
-
-        {/* Active Log Sources */}
-        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-safe)]/50 transition-all">
+        {/* Threat Lookup Count */}
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-[var(--color-primary-500)]/50 transition-all">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
-              Log Sources
+              Threat Lookups
             </span>
-            <ServerIcon className="w-4 h-4 text-[var(--color-safe)]" />
+            <CpuChipIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
           </div>
-          <p className="text-2xl font-bold font-mono text-[var(--color-text-primary)]">
-            {activeLogSourcesCount}
+          <p className="text-2xl font-bold font-mono text-[var(--color-primary-500)]">
+            {totalCachedQueries}
           </p>
-          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Connected Feeds</p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">External Queries</p>
+        </div>
+
+        {/* Cache Hit Ratio */}
+        <div className="glass rounded-xl p-4 border border-[var(--color-border)] hover:border-blue-400/50 transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider">
+              Cache Hit Ratio
+            </span>
+            <ClockIcon className="w-4 h-4 text-blue-400" />
+          </div>
+          <p className="text-2xl font-bold font-mono text-blue-400">
+            {cacheHitRatio}%
+          </p>
+          <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Cache Telemetry</p>
         </div>
 
         {/* Active Threats */}
@@ -351,6 +386,128 @@ export default function DashboardPage() {
             {openIncidents}
           </p>
           <p className="text-[10px] text-[var(--color-text-secondary)] mt-1 font-medium">Active Tickets</p>
+        </div>
+      </div>
+
+      {/* ── LIVE THREAT INTELLIGENCE INTEGRATION WIDGETS ROW ─────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Provider Status Widget */}
+        <div className="glass rounded-xl p-5 border border-[var(--color-border)] flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <SignalIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
+              <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
+                External Provider Status
+              </h2>
+            </div>
+            <Link
+              to="/intelligence"
+              className="text-xs font-semibold text-[var(--color-primary-500)] hover:underline flex items-center gap-1"
+            >
+              <span>Provider Hub</span>
+              <ArrowRightIcon className="w-3 h-3" />
+            </Link>
+          </div>
+
+          <div className="space-y-2 font-mono text-xs">
+            {providerList.length === 0 ? (
+              <p className="text-xs text-[var(--color-text-muted)]">Checking provider statuses...</p>
+            ) : (
+              providerList.map((p: any) => (
+                <div
+                  key={p.name}
+                  className="flex items-center justify-between p-2.5 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)]"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-[var(--color-text-primary)]">{p.name}</span>
+                  </div>
+                  {p.configured ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[var(--color-safe)]/20 text-[var(--color-safe)] flex items-center gap-1">
+                      <CheckCircleIcon className="w-3 h-3" /> READY
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[var(--color-critical)]/20 text-[var(--color-critical)] flex items-center gap-1">
+                      <XCircleIcon className="w-3 h-3" /> UNAVAILABLE
+                    </span>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Threat Feed Health Widget */}
+        <div className="glass rounded-xl p-5 border border-[var(--color-border)] flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ServerIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
+              <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
+                Threat Feed Health
+              </h2>
+            </div>
+            <span className="text-xs font-bold text-[var(--color-safe)] font-mono">
+              {activeFeedsCount} Feeds Active
+            </span>
+          </div>
+
+          <div className="space-y-2 text-xs">
+            {(feedsSummary?.items || []).slice(0, 3).map((feed: any) => (
+              <div
+                key={feed.id}
+                className="flex items-center justify-between p-2.5 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)] font-mono"
+              >
+                <div>
+                  <p className="font-bold text-[var(--color-text-primary)]">{feed.feed_name}</p>
+                  <p className="text-[10px] text-[var(--color-text-muted)]">{feed.provider} • {feed.total_indicators} IOCs</p>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] bg-[var(--color-safe)]/20 text-[var(--color-safe)] font-bold">
+                  {feed.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Top Malicious IOCs Widget */}
+        <div className="glass rounded-xl p-5 border border-[var(--color-border)] flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FireIcon className="w-4 h-4 text-[var(--color-critical)]" />
+              <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
+                Top Malicious IOCs
+              </h2>
+            </div>
+            <Link
+              to="/intelligence"
+              className="text-xs font-semibold text-[var(--color-primary-500)] hover:underline flex items-center gap-1"
+            >
+              <span>View All</span>
+              <ArrowRightIcon className="w-3 h-3" />
+            </Link>
+          </div>
+
+          <div className="space-y-2 text-xs font-mono">
+            {topMaliciousIocs.length === 0 ? (
+              <div className="p-4 text-center text-xs text-[var(--color-text-muted)]">
+                No critical malicious indicators flagged.
+              </div>
+            ) : (
+              topMaliciousIocs.slice(0, 3).map((ioc: any) => (
+                <div
+                  key={ioc.id}
+                  className="flex items-center justify-between p-2.5 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)]"
+                >
+                  <div className="truncate max-w-[170px]">
+                    <p className="font-bold text-[var(--color-text-primary)] truncate">{ioc.value}</p>
+                    <p className="text-[10px] text-[var(--color-text-muted)]">{ioc.ioc_type} • {ioc.threat_type}</p>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[var(--color-critical)]/20 text-[var(--color-critical)]">
+                    {ioc.severity}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
 
@@ -414,61 +571,52 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Log Severity Distribution */}
+        {/* Latest IOC Enrichment Feed Widget */}
         <div className="glass rounded-xl p-5 border border-[var(--color-border)] flex flex-col justify-between">
           <div>
-            <h2 className="text-sm font-bold text-[var(--color-text-primary)]">
-              Log Severity Distribution
-            </h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-bold text-[var(--color-text-primary)] flex items-center gap-2">
+                <CpuChipIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
+                <span>Latest IOC Enrichments</span>
+              </h2>
+              <span className="text-[10px] font-mono text-[var(--color-primary-500)] uppercase font-bold">
+                LIVE STREAM
+              </span>
+            </div>
             <p className="text-[11px] text-[var(--color-text-muted)] font-mono">
-              Classification by severity level
+              Indicators analyzed across VirusTotal, AbuseIPDB & Shodan
             </p>
           </div>
 
-          <div className="h-48 w-full flex items-center justify-center my-2">
-            {isLogStatsLoading ? (
-              <div className="w-32 h-32 skeleton rounded-full" />
-            ) : !logSeverityPieData.length ? (
-              <div className="text-xs font-mono text-[var(--color-text-muted)]">
-                No log data available
+          <div className="space-y-2 font-mono text-xs my-3">
+            {recentEnrichments.length === 0 ? (
+              <div className="p-4 text-center text-xs text-[var(--color-text-muted)]">
+                No recent IOC enrichments recorded.
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={logSeverityPieData}
-                    innerRadius={45}
-                    outerRadius={70}
-                    paddingAngle={4}
-                    dataKey="value"
-                  >
-                    {logSeverityPieData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#0f1520",
-                      borderColor: "#1c2638",
-                      borderRadius: "8px",
-                      fontSize: "11px",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              recentEnrichments.slice(0, 4).map((ioc: any) => (
+                <div
+                  key={ioc.id}
+                  className="p-2.5 rounded-lg bg-[var(--color-surface-200)]/60 border border-[var(--color-border)] flex items-center justify-between"
+                >
+                  <div className="truncate max-w-[150px]">
+                    <p className="font-bold text-[var(--color-text-primary)] truncate">{ioc.value}</p>
+                    <p className="text-[10px] text-[var(--color-text-muted)]">{ioc.ioc_type}</p>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400">
+                    {ioc.confidence}% Conf.
+                  </span>
+                </div>
+              ))
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            {logSeverityPieData.map((item) => (
-              <div key={item.name} className="flex items-center gap-2 font-mono">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                <span className="text-[11px] font-medium text-[var(--color-text-secondary)]">
-                  {item.name}: <span className="font-bold text-[var(--color-text-primary)]">{item.value.toLocaleString()}</span>
-                </span>
-              </div>
-            ))}
-          </div>
+          <Link
+            to="/intelligence"
+            className="w-full text-center py-2 rounded-lg bg-[var(--color-surface-200)] border border-[var(--color-border)] text-xs font-bold text-[var(--color-primary-500)] hover:bg-[var(--color-surface-300)] transition-all"
+          >
+            Launch IOC Lookup Tool →
+          </Link>
         </div>
       </div>
 

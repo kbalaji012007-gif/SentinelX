@@ -43,7 +43,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         environment=settings.ENVIRONMENT,
         debug=settings.DEBUG,
     )
-    # Startup: initialize connections, caches, etc.
+    # Startup: initialize connections, caches, and validate provider configuration
+    logger.info(
+        "threat_intel_providers_startup_check",
+        virustotal_configured=bool(settings.VIRUSTOTAL_API_KEY and settings.VIRUSTOTAL_API_KEY.strip()),
+        abuseipdb_configured=bool(settings.ABUSEIPDB_API_KEY and settings.ABUSEIPDB_API_KEY.strip()),
+        shodan_configured=bool(settings.SHODAN_API_KEY and settings.SHODAN_API_KEY.strip()),
+        gemini_configured=bool(settings.GEMINI_API_KEY and settings.GEMINI_API_KEY.strip()),
+    )
     yield
     # Shutdown: cleanup connections
     logger.info("sentinelx_shutdown")
