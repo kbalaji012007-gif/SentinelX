@@ -41,6 +41,7 @@ from app.models.soar_execution import (
     SOARNotification,
 )
 from app.models.ai_soc import AIInvestigationHistory, AIThreatHunt
+from app.models.ai_copilot import AIChatConversation, AIChatMessage, AIGeneratedReport
 
 __all__ = [
     "Base",
@@ -81,4 +82,7 @@ __all__ = [
     "SOARNotification",
     "AIInvestigationHistory",
     "AIThreatHunt",
+    "AIChatConversation",
+    "AIChatMessage",
+    "AIGeneratedReport",
 ]

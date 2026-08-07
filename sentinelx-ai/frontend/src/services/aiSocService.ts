@@ -82,7 +82,60 @@ export interface InvestigationListResponse {
   items: InvestigationResponse[];
 }
 
+export interface AIChatMessage {
+  id: string;
+  conversation_id: string;
+  sender: "User" | "Copilot";
+  content: string;
+  evidence: Record<string, any>;
+  confidence_score: number;
+  created_at: string;
+}
+
+export interface AIExplainResponse {
+  observed_data: string[];
+  external_intelligence: string[];
+  ai_reasoning: string;
+  confidence: number;
+  limitations?: string | null;
+}
+
+export interface AIReportResponse {
+  id?: string;
+  report_type: string;
+  title: string;
+  markdown_content: string;
+  json_content: Record<string, any>;
+  created_by: string;
+  created_at?: string;
+}
+
 // ── API Functions ─────────────────────────────────────────────
+
+export async function sendCopilotChat(message: string, conversationId?: string): Promise<AIChatMessage> {
+  const { data } = await apiClient.post<AIChatMessage>("/ai/chat", {
+    message,
+    conversation_id: conversationId,
+  });
+  return data;
+}
+
+export async function fetchAIExplanation(entityType: string, entityId: string): Promise<AIExplainResponse> {
+  const { data } = await apiClient.post<AIExplainResponse>("/ai/explain", {
+    entity_type: entityType,
+    entity_id: entityId,
+  });
+  return data;
+}
+
+export async function generateAIReport(reportType: string, title?: string, outputFormat = "markdown"): Promise<AIReportResponse> {
+  const { data } = await apiClient.post<AIReportResponse>("/ai/report", {
+    report_type: reportType,
+    title,
+    output_format: outputFormat,
+  });
+  return data;
+}
 
 export async function triggerAIInvestigation(investigationType: string, targetId: string): Promise<InvestigationResponse> {
   const { data } = await apiClient.post<InvestigationResponse>("/ai/investigate", {
@@ -115,4 +168,8 @@ export async function fetchAIHistory(page = 1, pageSize = 25): Promise<Investiga
     params: { page, page_size: pageSize },
   });
   return data;
+}
+
+export async function deleteAIHistoryItem(id: string): Promise<void> {
+  await apiClient.delete(`/ai/history/${id}`);
 }

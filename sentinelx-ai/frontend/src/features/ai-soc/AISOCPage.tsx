@@ -8,6 +8,9 @@ import {
   CheckCircleIcon,
   ClockIcon,
   BoltIcon,
+  PaperAirplaneIcon,
+  DocumentArrowDownIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
 
 import {
@@ -16,14 +19,30 @@ import {
   fetchAIRiskAssessment,
   fetchAIRecommendations,
   fetchAIHistory,
+  sendCopilotChat,
+  generateAIReport,
+  deleteAIHistoryItem,
   type InvestigationResponse,
   type ThreatHuntResponse,
+  type AIChatMessage,
 } from "../../services/aiSocService";
 
 export default function AISOCPage() {
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<"investigate" | "hunting" | "risk" | "recommendations" | "history">("investigate");
+  const [activeTab, setActiveTab] = useState<"copilot" | "investigate" | "hunting" | "risk" | "recommendations" | "history">("copilot");
+
+  // Copilot Chat State
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<Array<{ sender: "User" | "Copilot"; text: string; confidence?: number; evidence?: any }>>([
+    {
+      sender: "Copilot",
+      text: "Hello SOC Analyst! I am your **SentinelX AI Copilot**. Ask me natural language questions like *'Show critical incidents from last 24 hours'* or *'List ransomware threats'*.",
+      confidence: 98,
+    },
+  ]);
+  const [activeConversationId, setActiveConversationId] = useState<string | undefined>(undefined);
+  const [reportFormat, setReportFormat] = useState("markdown");
 
   // Investigation Form State
   const [investigationType, setInvestigationType] = useState("Incident");
@@ -54,6 +73,40 @@ export default function AISOCPage() {
     refetchInterval: 15000,
   });
 
+  // Copilot Chat Mutation
+  const chatMutation = useMutation({
+    mutationFn: (msg: string) => sendCopilotChat(msg, activeConversationId),
+    onSuccess: (data: AIChatMessage) => {
+      setActiveConversationId(data.conversation_id);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          sender: "Copilot",
+          text: data.content,
+          confidence: data.confidence_score,
+          evidence: data.evidence,
+        },
+      ]);
+      queryClient.invalidateQueries({ queryKey: ["ai-history"] });
+    },
+  });
+
+  // Report Generator Mutation
+  const reportMutation = useMutation({
+    mutationFn: (reportType: string) => generateAIReport(reportType, undefined, reportFormat),
+    onSuccess: (data) => {
+      // Trigger browser download for generated report
+      const blob = new Blob([data.markdown_content], { type: "text/markdown;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `sentinelx_${data.report_type.toLowerCase()}_report.md`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    },
+  });
+
   // Investigation Mutation
   const investigateMutation = useMutation({
     mutationFn: () => triggerAIInvestigation(investigationType, targetId),
@@ -70,6 +123,34 @@ export default function AISOCPage() {
       setActiveHunt(data);
     },
   });
+
+  // Delete History Item
+  const deleteHistoryMutation = useMutation({
+    mutationFn: (id: string) => deleteAIHistoryItem(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai-history"] });
+    },
+  });
+
+  const handleSendChat = (prompt?: string) => {
+    const textToSend = prompt || chatInput;
+    if (!textToSend.trim()) return;
+
+    setChatMessages((prev) => [...prev, { sender: "User", text: textToSend }]);
+    setChatInput("");
+    chatMutation.mutate(textToSend);
+  };
+
+  const suggestedPrompts = [
+    "Investigate latest incident",
+    "Show critical incidents from last 24 hours",
+    "Show failed logins",
+    "Summarize attack chain",
+    "Explain this IOC",
+    "Recommend remediation",
+    "Generate executive report",
+    "Find suspicious users",
+  ];
 
   const historyItems = historyData?.items || [];
 
@@ -94,29 +175,30 @@ export default function AISOCPage() {
           <div className="flex items-center gap-2 mb-1">
             <SparklesIcon className="w-6 h-6 text-[var(--color-primary-500)] animate-pulse" />
             <h1 className="text-xl font-extrabold text-[var(--color-text-primary)]">
-              AI SOC Analyst & Autonomous Security Operations
+              SentinelX Enterprise AI Copilot & Natural Language Security Assistant
             </h1>
           </div>
           <p className="text-xs text-[var(--color-text-secondary)]">
-            Generative AI reasoning engine cross-analyzing Threats, Incidents, Assets, Logs, IOCs, and SOAR execution history
+            Interact with natural language queries, multi-format security reports (PDF/Markdown/JSON), and AI explainability breakdowns
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="px-4 py-2 rounded-xl bg-[var(--color-surface-300)]/60 border border-[var(--color-border)] flex items-center gap-3">
-            <div>
-              <p className="text-[10px] uppercase font-bold text-[var(--color-text-muted)] font-mono">AI Confidence Score</p>
-              <p className="text-lg font-extrabold font-mono text-[var(--color-primary-500)]">
-                94% Accuracy
-              </p>
-            </div>
-          </div>
+          <button
+            onClick={() => reportMutation.mutate("Executive")}
+            disabled={reportMutation.isPending}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-[var(--color-primary-500)] to-purple-600 text-[var(--color-surface-0)] text-xs font-bold hover:opacity-90 transition-all shadow-lg shadow-[var(--color-primary-500)]/20"
+          >
+            <DocumentArrowDownIcon className="w-4 h-4" />
+            <span>Generate Executive Report</span>
+          </button>
         </div>
       </div>
 
       {/* Navigation Tabs */}
       <div className="flex gap-2 border-b border-[var(--color-border)] pb-3 overflow-x-auto">
         {[
+          { id: "copilot", label: "Enterprise AI Copilot", icon: SparklesIcon },
           { id: "investigate", label: "AI Deep Investigation", icon: SparklesIcon },
           { id: "hunting", label: "Proactive Threat Hunting", icon: MagnifyingGlassIcon },
           { id: "risk", label: "Predictive Risk Assessment", icon: ShieldExclamationIcon },
@@ -137,6 +219,136 @@ export default function AISOCPage() {
           </button>
         ))}
       </div>
+
+      {/* Tab 0: Enterprise AI Copilot Chat Console */}
+      {activeTab === "copilot" && (
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Main Chat Thread Area */}
+          <div className="lg:col-span-3 space-y-4">
+            {/* Suggested Prompts Pills */}
+            <div className="glass rounded-xl p-3 border border-[var(--color-border)] space-y-2">
+              <span className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider block font-mono">
+                Suggested Security Prompts
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {suggestedPrompts.map((p, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSendChat(p)}
+                    className="px-3 py-1 rounded-lg bg-[var(--color-surface-200)] text-[11px] font-mono text-[var(--color-text-primary)] hover:bg-[var(--color-primary-500)] hover:text-[var(--color-surface-0)] transition-all border border-[var(--color-border)]"
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Chat Thread Messages Box */}
+            <div className="glass rounded-xl p-5 border border-[var(--color-border)] space-y-4 min-h-[420px] max-h-[500px] overflow-y-auto font-mono text-xs">
+              {chatMessages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={`flex gap-3 ${msg.sender === "User" ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-2xl p-4 rounded-2xl border space-y-2 ${
+                      msg.sender === "User"
+                        ? "bg-[var(--color-primary-500)]/20 text-[var(--color-text-primary)] border-[var(--color-primary-500)]/40 ml-12"
+                        : "bg-[var(--color-surface-200)]/80 text-[var(--color-text-primary)] border-[var(--color-border)] mr-12"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between border-b border-[var(--color-border)]/40 pb-1 text-[10px]">
+                      <span className="font-bold text-[var(--color-primary-500)]">
+                        {msg.sender === "User" ? "SOC Analyst" : "SentinelX AI Copilot"}
+                      </span>
+                      {msg.confidence ? (
+                        <span className="text-[var(--color-safe)] font-bold">
+                          {msg.confidence}% Confidence
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="whitespace-pre-wrap font-sans text-xs leading-relaxed">
+                      {msg.text}
+                    </div>
+
+                    {/* Evidence & Attribution Panel */}
+                    {msg.evidence && (
+                      <div className="p-2.5 rounded-lg bg-[var(--color-surface-300)] text-[10px] space-y-1 font-mono border border-[var(--color-border)]">
+                        <span className="font-bold text-[var(--color-text-muted)] uppercase block">Observed Evidence & Attribution</span>
+                        <p className="text-[var(--color-text-secondary)]">SQL Filter: <code>{msg.evidence.sql_filter}</code></p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {chatMutation.isPending && (
+                <div className="flex gap-2 items-center text-xs font-mono text-[var(--color-primary-500)] animate-pulse">
+                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                  <span>SentinelX Copilot analyzing platform telemetry...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Chat Input Box */}
+            <div className="glass rounded-xl p-3 border border-[var(--color-border)] flex items-center gap-3">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSendChat()}
+                placeholder="Ask AI Copilot: 'Show critical incidents from last 24 hours', 'Show failed logins'..."
+                className="flex-1 px-4 py-2.5 rounded-xl bg-[var(--color-surface-200)] border border-[var(--color-border)] text-xs font-mono text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-primary-500)]"
+              />
+              <button
+                onClick={() => handleSendChat()}
+                disabled={chatMutation.isPending}
+                className="px-5 py-2.5 rounded-xl bg-[var(--color-primary-500)] text-[var(--color-surface-0)] font-bold text-xs hover:bg-[var(--color-primary-600)] transition-all flex items-center gap-2 shrink-0 disabled:opacity-50"
+              >
+                <PaperAirplaneIcon className="w-4 h-4" />
+                <span>Send</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Copilot Sidebar Panel */}
+          <div className="space-y-4 font-mono text-xs">
+            {/* Quick Report Download Box */}
+            <div className="glass rounded-xl p-4 border border-[var(--color-border)] space-y-3">
+              <h3 className="font-bold text-[var(--color-text-primary)] uppercase text-[10px] tracking-wider">
+                Instant Report Exporter
+              </h3>
+              <div className="space-y-2">
+                <select
+                  value={reportFormat}
+                  onChange={(e) => setReportFormat(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg bg-[var(--color-surface-200)] border border-[var(--color-border)] text-xs text-[var(--color-text-primary)]"
+                >
+                  <option value="markdown">Markdown (.md)</option>
+                  <option value="json">JSON (.json)</option>
+                  <option value="pdf">PDF Structure (.pdf)</option>
+                </select>
+                <button
+                  onClick={() => reportMutation.mutate("Incident")}
+                  disabled={reportMutation.isPending}
+                  className="w-full py-2 rounded-xl bg-[var(--color-surface-300)] text-[var(--color-text-primary)] font-bold text-xs hover:bg-[var(--color-surface-400)] transition-all flex items-center justify-center gap-2"
+                >
+                  <DocumentArrowDownIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
+                  <span>Download Incident Report</span>
+                </button>
+                <button
+                  onClick={() => reportMutation.mutate("SOAR")}
+                  disabled={reportMutation.isPending}
+                  className="w-full py-2 rounded-xl bg-[var(--color-surface-300)] text-[var(--color-text-primary)] font-bold text-xs hover:bg-[var(--color-surface-400)] transition-all flex items-center justify-center gap-2"
+                >
+                  <DocumentArrowDownIcon className="w-4 h-4 text-purple-400" />
+                  <span>Download SOAR Report</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab 1: AI Deep Investigation */}
       {activeTab === "investigate" && (
@@ -235,27 +447,7 @@ export default function AISOCPage() {
                 </div>
               </div>
 
-              {/* MITRE ATT&CK Mapping */}
-              <div className="space-y-2">
-                <h3 className="font-bold text-[var(--color-text-primary)] uppercase text-[10px] tracking-wider">
-                  MITRE ATT&CK Correlation Mapping
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {activeInvestigation.mitre_mapping.map((m, idx) => (
-                    <div key={idx} className="p-3 rounded-lg bg-[var(--color-surface-300)] border border-[var(--color-border)] flex items-center justify-between">
-                      <div>
-                        <span className="font-bold text-[var(--color-primary-500)] mr-2">{m.technique_id}</span>
-                        <span className="text-[var(--color-text-primary)] font-bold">{m.technique_name}</span>
-                      </div>
-                      <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-[var(--color-surface-200)] text-[var(--color-text-muted)]">
-                        {m.tactic}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Rule 8: Safety & Evidence Breakdown */}
+              {/* Evidence Breakdown */}
               <div className="p-4 rounded-xl bg-[var(--color-surface-200)] border border-[var(--color-border)] space-y-3">
                 <h3 className="font-bold text-[var(--color-text-primary)] uppercase text-[10px] tracking-wider flex items-center gap-2">
                   <CheckCircleIcon className="w-4 h-4 text-[var(--color-safe)]" />
@@ -368,18 +560,6 @@ export default function AISOCPage() {
               </div>
 
               <p className="text-[11px] text-[var(--color-text-primary)] font-sans">{activeHunt.findings_summary}</p>
-
-              <div className="space-y-2">
-                <h3 className="font-bold text-[var(--color-text-primary)] uppercase text-[10px]">Matched Telemetry Artifacts</h3>
-                <div className="space-y-2">
-                  {activeHunt.matched_artifacts.map((art, idx) => (
-                    <div key={idx} className="p-3 rounded-lg bg-[var(--color-surface-200)] border border-[var(--color-border)] flex items-center justify-between">
-                      <span className="font-bold text-[var(--color-primary-500)]">[{art.artifact}]</span>
-                      <span className="text-[var(--color-text-primary)] font-sans">{art.details}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           )}
         </div>
@@ -394,7 +574,6 @@ export default function AISOCPage() {
               <p className="text-3xl font-extrabold text-[var(--color-high)]">
                 {riskAssessment?.business_risk_score ?? 78} / 100
               </p>
-              <p className="text-[10px] text-[var(--color-text-secondary)] font-sans">Elevated risk due to lateral movement</p>
             </div>
 
             <div className="glass rounded-xl p-5 border border-[var(--color-border)] space-y-2 col-span-2">
@@ -402,35 +581,6 @@ export default function AISOCPage() {
               <p className="text-sm font-bold text-[var(--color-text-primary)]">
                 {riskAssessment?.attack_spread_prediction}
               </p>
-            </div>
-          </div>
-
-          {/* High Risk Assets */}
-          <div className="glass rounded-xl border border-[var(--color-border)] overflow-hidden">
-            <div className="p-4 border-b border-[var(--color-border)] font-bold text-[var(--color-text-primary)]">
-              High Risk Enterprise Assets
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-[var(--color-surface-200)] text-[var(--color-text-muted)] font-bold uppercase">
-                  <tr>
-                    <th className="px-4 py-3">Asset Name</th>
-                    <th className="px-4 py-3">IP Address</th>
-                    <th className="px-4 py-3">Risk Score</th>
-                    <th className="px-4 py-3">Risk Reason</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border)]">
-                  {(riskAssessment?.high_risk_assets || []).map((ast, idx) => (
-                    <tr key={idx} className="hover:bg-[var(--color-surface-200)]/40">
-                      <td className="px-4 py-3 font-bold text-[var(--color-text-primary)]">{ast.asset_name}</td>
-                      <td className="px-4 py-3 text-[var(--color-primary-500)]">{ast.ip_address}</td>
-                      <td className="px-4 py-3 font-bold text-[var(--color-critical)]">{ast.risk_score}</td>
-                      <td className="px-4 py-3 text-[var(--color-text-secondary)] font-sans">{ast.reason}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           </div>
         </div>
@@ -454,25 +604,9 @@ export default function AISOCPage() {
                         {pb.confidence_score}% Confidence
                       </span>
                     </div>
-                    <p className="text-[10px] text-[var(--color-text-muted)] font-sans">{pb.reason}</p>
                   </div>
                 ))}
               </div>
-            </div>
-
-            <div className="glass rounded-xl p-5 border border-[var(--color-border)] space-y-3">
-              <h3 className="font-bold text-[var(--color-safe)] uppercase text-[10px] flex items-center gap-2">
-                <CheckCircleIcon className="w-4 h-4" />
-                <span>Actionable Remediation Checklist</span>
-              </h3>
-              <ul className="space-y-2">
-                {(recommendations?.remediation_recommendations || []).map((rem, idx) => (
-                  <li key={idx} className="p-2.5 rounded-lg bg-[var(--color-surface-200)] text-[11px] text-[var(--color-text-primary)] font-sans border border-[var(--color-border)] flex items-start gap-2">
-                    <span className="font-bold text-[var(--color-primary-500)] shrink-0">•</span>
-                    <span>{rem}</span>
-                  </li>
-                ))}
-              </ul>
             </div>
           </div>
         </div>
@@ -498,8 +632,7 @@ export default function AISOCPage() {
                     <th className="px-4 py-3">Target ID</th>
                     <th className="px-4 py-3">Executive Summary</th>
                     <th className="px-4 py-3">Severity</th>
-                    <th className="px-4 py-3">Confidence</th>
-                    <th className="px-4 py-3">Timestamp</th>
+                    <th className="px-4 py-3 text-right">Delete</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border)]">
@@ -515,9 +648,15 @@ export default function AISOCPage() {
                           {item.severity}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-bold text-[var(--color-safe)]">{item.confidence_score}%</td>
-                      <td className="px-4 py-3 text-[var(--color-text-muted)]">
-                        {item.created_at ? new Date(item.created_at).toLocaleTimeString() : "—"}
+                      <td className="px-4 py-3 text-right">
+                        {item.id && (
+                          <button
+                            onClick={() => deleteHistoryMutation.mutate(item.id!)}
+                            className="p-1 text-[var(--color-critical)] hover:bg-[var(--color-critical)]/20 rounded"
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
