@@ -57,6 +57,7 @@ import {
   fetchAIRecommendations,
   fetchAIHistory,
 } from "../../services/aiSocService";
+import { fetchAgentStatistics } from "../../services/agentService";
 
 export default function DashboardPage() {
   // ── 1. General Dashboard Queries ─────────────────────────────────────────
@@ -218,9 +219,17 @@ export default function DashboardPage() {
     refetchInterval: 15000,
   });
 
+  const { data: agentStats } = useQuery({
+    queryKey: ["agent-statistics"],
+    queryFn: fetchAgentStatistics,
+    refetchInterval: 15000,
+  });
+
   // ── Computed Log Telemetry Metrics ──────────────────────────────────────
   const totalLogsToday = logStats?.total_entries ?? 0;
   const activeLogSourcesCount = logSourcesSummary?.total ?? 0;
+  const totalEndpointsCount = agentStats?.total_endpoints ?? 0;
+  const onlineEndpointsCount = agentStats?.online_endpoints ?? 0;
 
   // Format Log Volume Timeline for Recharts AreaChart
   const logVolumeChartData = useMemo(() => {

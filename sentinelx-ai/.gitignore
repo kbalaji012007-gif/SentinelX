@@ -6,6 +6,7 @@
 .env
 .env.local
 .env.*.local
+.agent_identity.json
 
 # ── Python ───────────────────────────────────────────────
 __pycache__/

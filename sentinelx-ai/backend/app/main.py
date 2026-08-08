@@ -87,6 +87,7 @@ from app.api.v1.correlation.router import router as correlation_router
 from app.api.v1.soar.router import router as soar_router
 from app.api.v1.ai.router import router as ai_router
 from app.api.v1.users.router import router as users_router
+from app.api.v1.agents.router import router as agents_router
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
@@ -101,6 +102,7 @@ app.include_router(correlation_router, prefix="/api/v1")
 app.include_router(soar_router, prefix="/api/v1")
 app.include_router(ai_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
+app.include_router(agents_router, prefix="/api/v1")
 
 
 @app.get("/", tags=["Health"])

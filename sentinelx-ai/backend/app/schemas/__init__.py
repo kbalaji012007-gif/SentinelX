@@ -82,6 +82,22 @@ from app.schemas.threat_intelligence_schema import (
     ThreatIntelStatsResponse,
 )
 
+from app.schemas.agent_schema import (
+    AgentEnrollRequest,
+    AgentEnrollResponse,
+    AgentHeartbeatRequest,
+    AgentHeartbeatResponse,
+    AgentTelemetryCreate,
+    AgentTelemetryBatchCreate,
+    AgentTelemetryResponse,
+    AgentTelemetryListResponse,
+    EndpointAgentSummary,
+    EndpointAgentResponse,
+    EndpointAgentListResponse,
+    EndpointAgentStatsResponse,
+    EndpointDetailsResponse,
+)
+
 __all__ = [
     "RoleBase",
     "RoleCreate",
@@ -155,4 +171,17 @@ __all__ = [
     "ThreatCacheCreate",
     "ThreatCacheResponse",
     "ThreatIntelStatsResponse",
+    "AgentEnrollRequest",
+    "AgentEnrollResponse",
+    "AgentHeartbeatRequest",
+    "AgentHeartbeatResponse",
+    "AgentTelemetryCreate",
+    "AgentTelemetryBatchCreate",
+    "AgentTelemetryResponse",
+    "AgentTelemetryListResponse",
+    "EndpointAgentSummary",
+    "EndpointAgentResponse",
+    "EndpointAgentListResponse",
+    "EndpointAgentStatsResponse",
+    "EndpointDetailsResponse",
 ]

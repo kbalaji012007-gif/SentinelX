@@ -42,6 +42,7 @@ function App() {
         <Route path="threats" element={<ThreatsPage />} />
         <Route path="incidents" element={<IncidentsPage />} />
         <Route path="assets" element={<AssetsPage />} />
+        <Route path="agents" element={<AgentsPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="intelligence" element={<IntelligencePage />} />
         <Route path="correlation" element={<CorrelationPage />} />

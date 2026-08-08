@@ -6,6 +6,7 @@ import {
   ExclamationTriangleIcon,
   ShieldExclamationIcon,
   ServerIcon,
+  ComputerDesktopIcon,
   DocumentTextIcon,
   CpuChipIcon,
   LinkIcon,
@@ -22,6 +23,7 @@ import { fetchThreats } from "../../services/threatService";
 import { fetchIncidents } from "../../services/incidentService";
 import { fetchDashboardSummary } from "../../services/dashboardService";
 import { fetchLogEntries } from "../../services/logService";
+import { fetchAgents } from "../../services/agentService";
 
 export default function Sidebar() {
   // Query live threat count
@@ -52,17 +54,26 @@ export default function Sidebar() {
     refetchInterval: 30000,
   });
 
+  // Query live agents count
+  const { data: agentsData } = useQuery({
+    queryKey: ["agents", { page: 1, page_size: 1 }],
+    queryFn: () => fetchAgents({ page_size: 1 }),
+    refetchInterval: 15000,
+  });
+
   const threatsCount = threatsData?.total ?? 0;
   const incidentsCount = incidentsData?.total ?? 0;
   const vulnerabilitiesCount = summaryData?.vulnerability_count ?? 0;
   const assetsCount = summaryData?.asset_count ?? 0;
   const logsCount = logsData?.total ?? 0;
+  const agentsCount = agentsData?.total ?? 0;
 
   const mainNavigation = [
     { name: "Dashboard", href: "/", icon: HomeIcon },
     { name: "Threats", href: "/threats", icon: ExclamationTriangleIcon, badge: threatsCount },
     { name: "Incidents", href: "/incidents", icon: ShieldExclamationIcon, badge: incidentsCount },
     { name: "Assets", href: "/assets", icon: ServerIcon, badge: assetsCount },
+    { name: "Endpoints", href: "/agents", icon: ComputerDesktopIcon, badge: agentsCount },
     { name: "Logs", href: "/logs", icon: DocumentTextIcon, badge: logsCount },
     { name: "Threat Intelligence", href: "/intelligence", icon: CpuChipIcon },
     { name: "Threat Correlation", href: "/correlation", icon: LinkIcon },
