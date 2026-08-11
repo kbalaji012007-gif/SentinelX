@@ -6,7 +6,7 @@ import {
   ExclamationCircleIcon,
   ClockIcon,
   SignalIcon,
-  ShieldAlertIcon,
+  ShieldExclamationIcon,
   ArrowPathIcon,
   MagnifyingGlassIcon,
   XMarkIcon,
@@ -24,11 +24,11 @@ import {
   disableAgent,
   revokeAgent,
 } from "../../services/agentService";
-import { EndpointAgentSummary } from "../../types/agent";
+import type { EndpointAgentSummary } from "../../types/agent";
 
 export default function AgentsPage() {
   const queryClient = useQueryClient();
-  const [page, setPage] = useState(1);
+  const [page] = useState(1);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
@@ -150,7 +150,7 @@ export default function AgentsPage() {
           { label: "Offline", value: statsData?.offline_endpoints ?? 0, icon: ExclamationCircleIcon, color: "text-[var(--color-critical)]" },
           { label: "Stale", value: statsData?.stale_endpoints ?? 0, icon: ClockIcon, color: "text-[var(--color-medium)]" },
           { label: "Telemetry Today", value: statsData?.telemetry_events_today ?? 0, icon: SignalIcon, color: "text-[var(--color-secondary-500)]" },
-          { label: "Endpoint Threats", value: statsData?.endpoint_threats ?? 0, icon: ShieldAlertIcon, color: "text-[var(--color-high)]" },
+          { label: "Endpoint Threats", value: statsData?.endpoint_threats ?? 0, icon: ShieldExclamationIcon, color: "text-[var(--color-high)]" },
           { label: "Highest Risk", value: statsData?.highest_risk_endpoint || "None", icon: CpuChipIcon, color: "text-[var(--color-critical)]" },
         ].map((item) => (
           <div key={item.label} className="glass rounded-xl p-3 border border-[var(--color-border)] flex flex-col justify-between">
@@ -285,12 +285,20 @@ export default function AgentsPage() {
                           View
                         </button>
                         {agent.status !== "Disabled" && agent.status !== "Revoked" && (
-                          <button
-                            onClick={() => disableMutation.mutate(agent.agent_id)}
-                            className="px-2 py-1 rounded bg-[var(--color-surface-300)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs font-medium"
-                          >
-                            Disable
-                          </button>
+                          <>
+                            <button
+                              onClick={() => disableMutation.mutate(agent.agent_id)}
+                              className="px-2 py-1 rounded bg-[var(--color-surface-300)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-xs font-medium"
+                            >
+                              Disable
+                            </button>
+                            <button
+                              onClick={() => revokeMutation.mutate(agent.agent_id)}
+                              className="px-2 py-1 rounded bg-[var(--color-critical)]/15 text-[var(--color-critical)] hover:bg-[var(--color-critical)]/25 text-xs font-medium"
+                            >
+                              Revoke
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -333,7 +341,7 @@ export default function AgentsPage() {
             <div className="flex border-b border-[var(--color-border)] px-5 bg-[var(--color-surface-100)] gap-2">
               {[
                 { id: "overview", label: "System & Health", icon: CpuChipIcon },
-                { id: "security", label: "Security Events", icon: ShieldAlertIcon },
+                { id: "security", label: "Security Events", icon: ShieldExclamationIcon },
                 { id: "telemetry", label: "Telemetry Feed", icon: SignalIcon },
                 { id: "threats", label: "Threats", icon: ExclamationCircleIcon },
                 { id: "network", label: "Network Sockets", icon: GlobeAltIcon },

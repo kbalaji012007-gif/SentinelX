@@ -296,7 +296,7 @@ export default function DashboardPage() {
             </h1>
           </div>
           <p className="text-xs text-[var(--color-text-secondary)]">
-            Live correlation across {assetCount} enterprise assets & {activeLogSourcesCount} active log sources
+            Live correlation across {assetCount} enterprise assets, {totalEndpointsCount} telemetry endpoints ({onlineEndpointsCount} online) & {activeLogSourcesCount} active log sources
           </p>
         </div>
         <div className="flex items-center gap-3">
