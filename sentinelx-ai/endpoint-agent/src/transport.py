@@ -80,7 +80,7 @@ class Transport:
         payload = batch.model_dump(mode="json")
 
         try:
-            resp = self.session.post(url, json=payload, headers=self._get_headers(), timeout=15)
+            resp = self.session.post(url, json=payload, headers=self._get_headers(), timeout=45)
             if resp.status_code in (200, 201):
                 return resp.json()
             else:

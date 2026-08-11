@@ -84,7 +84,7 @@ def main() -> None:
         logger.info("No fake security events will be presented as real production events.")
         logger.info("All events will be explicitly tagged with is_simulated: True and SIMULATED_TEST_EVENT.")
 
-    agent = SentinelXAgent(test_mode=AgentConfig.TEST_MODE, once=args.once)
+    agent = SentinelXAgent(test_mode=AgentConfig.TEST_MODE, once=args.once, force_enroll=args.enroll)
     agent.start()
 
 

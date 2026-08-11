@@ -23,9 +23,10 @@ logger = logging.getLogger("sentinelx-agent")
 class SentinelXAgent:
     """Main Agent class orchestrating identity, collectors, heartbeat, and transport."""
 
-    def __init__(self, test_mode: bool = False, once: bool = False) -> None:
+    def __init__(self, test_mode: bool = False, once: bool = False, force_enroll: bool = False) -> None:
         self.test_mode = test_mode or AgentConfig.TEST_MODE
         self.once = once
+        self.force_enroll = force_enroll
         self.identity_mgr = IdentityManager()
         self.transport = Transport()
 
@@ -37,26 +38,37 @@ class SentinelXAgent:
         self.heartbeat_svc: Optional[HeartbeatService] = None
         self._running = False
 
-    def setup(self) -> bool:
+    def setup(self, force_enroll: Optional[bool] = None) -> bool:
         """Enroll or restore agent identity credentials."""
+        if force_enroll is None:
+            force_enroll = self.force_enroll
+
         logger.info("Initializing SentinelX Endpoint Telemetry Agent...")
+
+        if force_enroll:
+            logger.info("Forced re-enrollment requested. Resetting local agent_token.")
+            AgentConfig.update_credentials(AgentConfig.AGENT_ID, "")
+
         host_id = self.identity_mgr.collect_host_identity()
 
         if self.test_mode:
             logger.info("Running agent in TEST MODE. Events will be tagged as SIMULATED.")
 
-        # Enroll with SentinelX backend if token missing
-        if not AgentConfig.AGENT_TOKEN:
+        # Enroll with SentinelX backend if token missing or force_enroll requested
+        if force_enroll or not AgentConfig.AGENT_TOKEN:
             logger.info(f"Enrolling agent '{host_id.agent_id}' with backend at {AgentConfig.SENTINELX_API_URL}...")
             res = self.transport.enroll(host_id)
-            if res and "agent_token" in res:
-                self.identity_mgr.save_credentials(res["agent_id"], res["agent_token"])
+            if res and isinstance(res, dict) and res.get("agent_token"):
+                agent_id = str(res.get("agent_id") or host_id.agent_id)
+                agent_token = str(res["agent_token"])
+                self.identity_mgr.save_credentials(agent_id, agent_token)
                 logger.info("Agent enrollment complete!")
             else:
-                logger.warning("Enrollment response did not yield a valid token. Operating with local fallback token.")
-                # Fallback to local offline signature token if backend unavailable
-                token = f"agent-offline-token-{host_id.agent_id}"
-                self.identity_mgr.save_credentials(host_id.agent_id, token)
+                logger.error(
+                    f"Agent enrollment failed for host '{host_id.hostname}' ({host_id.agent_id}). "
+                    "Backend did not return a valid agent_token. Telemetry will NOT start."
+                )
+                return False
 
         # Initialize Heartbeat service
         self.heartbeat_svc = HeartbeatService(self.transport, host_id.agent_id, host_id.hostname)
@@ -95,7 +107,10 @@ class SentinelXAgent:
 
     def run_once(self) -> int:
         """Collect and dispatch a single telemetry batch."""
-        self.setup()
+        if not AgentConfig.AGENT_TOKEN:
+            if not self.setup():
+                logger.error("Agent setup/enrollment failed. Aborting single-cycle execution.")
+                return 0
 
         # Send heartbeat
         host_id = self.identity_mgr.collect_host_identity()

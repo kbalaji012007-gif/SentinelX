@@ -574,7 +574,17 @@ class AgentService:
 
         # Recent threats linked to this agent
         threats_res = await self.session.execute(
-            select(Threat).where(Threat.details.op("->>")("agent_id") == agent.agent_id).limit(10)
+            select(Threat)
+            .where(
+                or_(
+                    Threat.source.ilike(f"%{agent.hostname}%"),
+                    Threat.source.ilike(f"%{agent.agent_id}%"),
+                    Threat.description.ilike(f"%{agent.hostname}%"),
+                    Threat.description.ilike(f"%{agent.agent_id}%"),
+                    Threat.title.ilike(f"%{agent.hostname}%"),
+                )
+            )
+            .limit(10)
         )
         recent_threats_models = threats_res.scalars().all()
         recent_threats = [
@@ -661,7 +671,13 @@ class AgentService:
 
         # Count total endpoint threats
         threat_count_res = await self.session.execute(
-            select(func.count(Threat.id)).where(Threat.details.op("->>")("agent_id").isnot(None))
+            select(func.count(Threat.id)).where(
+                or_(
+                    Threat.source.ilike("%agent%"),
+                    Threat.source.ilike("%endpoint%"),
+                    Threat.source.ilike("%telemetry%"),
+                )
+            )
         )
         endpoint_threats = threat_count_res.scalar_one() or 0
 
