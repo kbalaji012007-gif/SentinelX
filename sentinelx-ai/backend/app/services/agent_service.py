@@ -34,8 +34,12 @@ from app.schemas.agent_schema import (
 )
 from app.schemas.log_schema import LogEntryCreate, LogSourceCreate
 from app.schemas.threat_schema import ThreatCreate, AlertCreate
+from app.schemas.security_alert_schema import SecurityAlertCreate
 from app.services.log_service import LogSourceService, LogEntryService
 from app.services.threat_service import ThreatService
+from app.services.security_alert_service import SecurityAlertService
+from app.realtime.manager import realtime_manager
+from app.realtime.events import RealtimeEventType
 from app.core.config import settings
 from app.core.exceptions import EntityNotFoundError, ValidationError
 
@@ -382,13 +386,21 @@ class AgentService:
         """
         Evaluate incoming telemetry against SentinelX threat detection rules.
         Creates Threat / Alert records when suspicious security patterns are detected.
+        Also creates SecurityAlert records for real-time SOC dashboard (Phase 6.4).
         """
+        import uuid as _uuid
         threats_created = 0
+        alert_svc = SecurityAlertService(self.session)
+        dedup_window = getattr(settings, "ALERT_DEDUP_WINDOW_SECONDS", 300)
 
         for item in items:
             payload = item.payload or {}
             event_id = str(payload.get("event_id", ""))
             event_type = item.event_type.lower()
+
+            event_ts = item.event_timestamp
+            if event_ts.tzinfo is None:
+                event_ts = event_ts.replace(tzinfo=timezone.utc)
 
             # Rule 1: Windows Failed Logon (Event ID 4625) or repeated failed logons
             if event_id == "4625" or event_type == "failed_logon":
@@ -401,7 +413,7 @@ class AgentService:
                         status="New",
                         category="Authentication Anomaly",
                         source_ip=payload.get("remote_address") or agent.agent_metadata.get("local_ip"),
-                        detected_at=item.event_timestamp,
+                        detected_at=event_ts,
                         details={
                             "agent_id": agent.agent_id,
                             "hostname": agent.hostname,
@@ -414,6 +426,39 @@ class AgentService:
                 )
                 threats_created += 1
 
+                # Phase 6.4: Create / deduplicate security alert
+                try:
+                    alert_id_key = f"failed-login-{agent.agent_id}"
+                    alert_data = SecurityAlertCreate(
+                        alert_id=alert_id_key,
+                        title=f"Multiple Failed Login Attempts on {agent.hostname}",
+                        description=f"Failed authentication attempt(s) detected for user '{target_user}' on {agent.hostname}. Windows Event ID 4625.",
+                        alert_type="failed_login",
+                        severity="LOW" if item.is_simulated else "HIGH",
+                        source=f"Endpoint: {agent.hostname}",
+                        agent_id=agent.id,
+                        mitre_tactic="Credential Access",
+                        mitre_technique="T1110",
+                        evidence={
+                            "event_id": "4625",
+                            "username": target_user,
+                            "hostname": agent.hostname,
+                            "agent_id": agent.agent_id,
+                            "source_ip": payload.get("remote_address"),
+                            "is_simulated": item.is_simulated,
+                        },
+                        alert_metadata={
+                            "hostname": agent.hostname,
+                            "platform": agent.platform,
+                            "os_version": agent.os_version,
+                            "agent_id": agent.agent_id,
+                        },
+                        detected_at=event_ts,
+                    )
+                    await alert_svc.create_alert(alert_data, dedup_window_seconds=dedup_window)
+                except Exception as exc:
+                    logger.warning("security_alert_creation_failed", rule="failed_login", error=str(exc))
+
             # Rule 2: Account Lockout (Event ID 4740)
             elif event_id == "4740" or event_type == "account_lockout":
                 target_user = payload.get("username", "Unknown User")
@@ -424,7 +469,7 @@ class AgentService:
                         severity="High" if not item.is_simulated else "Low",
                         status="New",
                         category="Brute Force / Account Lockout",
-                        detected_at=item.event_timestamp,
+                        detected_at=event_ts,
                         details={
                             "agent_id": agent.agent_id,
                             "hostname": agent.hostname,
@@ -436,6 +481,37 @@ class AgentService:
                     created_by="Endpoint Detection Engine",
                 )
                 threats_created += 1
+
+                # Phase 6.4: Create / deduplicate security alert for account lockout
+                try:
+                    alert_id_key = f"account-lockout-{agent.agent_id}-{target_user}"
+                    alert_data = SecurityAlertCreate(
+                        alert_id=alert_id_key,
+                        title=f"Account Lockout Detected on {agent.hostname}",
+                        description=f"User account '{target_user}' has been locked out on {agent.hostname}. Windows Event ID 4740.",
+                        alert_type="account_lockout",
+                        severity="LOW" if item.is_simulated else "HIGH",
+                        source=f"Endpoint: {agent.hostname}",
+                        agent_id=agent.id,
+                        mitre_tactic="Credential Access",
+                        mitre_technique="T1110.001",
+                        evidence={
+                            "event_id": "4740",
+                            "username": target_user,
+                            "hostname": agent.hostname,
+                            "agent_id": agent.agent_id,
+                            "is_simulated": item.is_simulated,
+                        },
+                        alert_metadata={
+                            "hostname": agent.hostname,
+                            "platform": agent.platform,
+                            "agent_id": agent.agent_id,
+                        },
+                        detected_at=event_ts,
+                    )
+                    await alert_svc.create_alert(alert_data, dedup_window_seconds=dedup_window)
+                except Exception as exc:
+                    logger.warning("security_alert_creation_failed", rule="account_lockout", error=str(exc))
 
             # Rule 3: Suspicious Process Execution (e.g., encoded powershell, cmd abuse, mimikatz)
             elif event_type in ("process", "process_creation") or event_id == "4688":
@@ -449,7 +525,7 @@ class AgentService:
                             severity="High" if not item.is_simulated else "Medium",
                             status="New",
                             category="Execution / Malware",
-                            detected_at=item.event_timestamp,
+                            detected_at=event_ts,
                             details={
                                 "agent_id": agent.agent_id,
                                 "hostname": agent.hostname,
@@ -461,6 +537,60 @@ class AgentService:
                         created_by="Endpoint Detection Engine",
                     )
                     threats_created += 1
+
+                    # Phase 6.4: Create / deduplicate security alert for suspicious process
+                    try:
+                        proc_name = payload.get("process_name", "unknown")[:50]
+                        alert_id_key = f"suspicious-process-{agent.agent_id}-{proc_name}"
+                        alert_data = SecurityAlertCreate(
+                            alert_id=alert_id_key,
+                            title=f"Suspicious Process Detected on {agent.hostname}",
+                            description=f"Potentially malicious command line on {agent.hostname}: {cmdline[:300]}",
+                            alert_type="suspicious_process",
+                            severity="MEDIUM" if item.is_simulated else "CRITICAL",
+                            source=f"Endpoint: {agent.hostname}",
+                            agent_id=agent.id,
+                            mitre_tactic="Execution",
+                            mitre_technique="T1059",
+                            evidence={
+                                "event_id": "4688",
+                                "command_line": cmdline[:500],
+                                "process_name": payload.get("process_name"),
+                                "hostname": agent.hostname,
+                                "agent_id": agent.agent_id,
+                                "is_simulated": item.is_simulated,
+                            },
+                            alert_metadata={
+                                "hostname": agent.hostname,
+                                "platform": agent.platform,
+                                "agent_id": agent.agent_id,
+                            },
+                            detected_at=event_ts,
+                        )
+                        await alert_svc.create_alert(alert_data, dedup_window_seconds=dedup_window)
+                    except Exception as exc:
+                        logger.warning("security_alert_creation_failed", rule="suspicious_process", error=str(exc))
+
+        # Broadcast telemetry.received for HIGH/CRITICAL telemetry items
+        if realtime_manager.connection_count > 0:
+            high_sev_items = [
+                i for i in items
+                if (i.severity or "").upper() in ("ERROR", "CRITICAL", "WARNING")
+                and not i.is_simulated
+            ]
+            if high_sev_items:
+                try:
+                    await realtime_manager.broadcast(
+                        RealtimeEventType.TELEMETRY_RECEIVED,
+                        {
+                            "agent_id": agent.agent_id,
+                            "hostname": agent.hostname,
+                            "event_count": len(high_sev_items),
+                            "event_types": list({i.event_type for i in high_sev_items}),
+                        },
+                    )
+                except Exception as exc:
+                    logger.debug("realtime_telemetry_broadcast_failed", error=str(exc))
 
         return threats_created
 

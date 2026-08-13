@@ -43,6 +43,7 @@ from app.models.soar_execution import (
 from app.models.ai_soc import AIInvestigationHistory, AIThreatHunt
 from app.models.ai_copilot import AIChatConversation, AIChatMessage, AIGeneratedReport
 from app.models.agent import EndpointAgent, AgentTelemetry
+from app.models.security_alert import SecurityAlert
 
 __all__ = [
     "Base",
@@ -88,4 +89,5 @@ __all__ = [
     "AIChatConversation",
     "AIChatMessage",
     "AIGeneratedReport",
+    "SecurityAlert",
 ]

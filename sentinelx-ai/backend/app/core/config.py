@@ -128,5 +128,12 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
 
+    # ── Real-Time SOC Settings (Phase 6.4) ───────────────────────
+    REALTIME_ENABLED: bool = True
+    # Deduplication window: alerts of same type+agent within this window are aggregated
+    ALERT_DEDUP_WINDOW_SECONDS: int = 300
+    # Number of failed login events before escalating to HIGH severity
+    ALERT_DEDUP_FAILED_LOGIN_THRESHOLD: int = 3
+
 
 settings = Settings()

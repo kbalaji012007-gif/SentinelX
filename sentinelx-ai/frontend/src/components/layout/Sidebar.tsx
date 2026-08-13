@@ -25,12 +25,24 @@ import { fetchDashboardSummary } from "../../services/dashboardService";
 import { fetchLogEntries } from "../../services/logService";
 import { fetchAgents } from "../../services/agentService";
 
+import { getAlertStatistics } from "../../services/alertService";
+import { useAlertStore } from "../../stores/alertStore";
+
 export default function Sidebar() {
+  const { unreadCount } = useAlertStore();
+
   // Query live threat count
   const { data: threatsData } = useQuery({
     queryKey: ["threats", { page: 1, page_size: 1 }],
     queryFn: () => fetchThreats({ page: 1, page_size: 1 }),
     refetchInterval: 30000,
+  });
+
+  // Query live alert statistics
+  const { data: alertStatsData } = useQuery({
+    queryKey: ["alert-statistics"],
+    queryFn: getAlertStatistics,
+    refetchInterval: 15000,
   });
 
   // Query live incident count
@@ -62,6 +74,7 @@ export default function Sidebar() {
   });
 
   const threatsCount = threatsData?.total ?? 0;
+  const alertsCount = unreadCount > 0 ? unreadCount : (alertStatsData?.new_alerts ?? 0);
   const incidentsCount = incidentsData?.total ?? 0;
   const vulnerabilitiesCount = summaryData?.vulnerability_count ?? 0;
   const assetsCount = summaryData?.asset_count ?? 0;
@@ -70,6 +83,7 @@ export default function Sidebar() {
 
   const mainNavigation = [
     { name: "Dashboard", href: "/", icon: HomeIcon },
+    { name: "Security Alerts", href: "/alerts", icon: ShieldExclamationIcon, badge: alertsCount, alertBadge: true },
     { name: "Threats", href: "/threats", icon: ExclamationTriangleIcon, badge: threatsCount },
     { name: "Incidents", href: "/incidents", icon: ShieldExclamationIcon, badge: incidentsCount },
     { name: "Assets", href: "/assets", icon: ServerIcon, badge: assetsCount },

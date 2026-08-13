@@ -16,7 +16,7 @@ from app.repositories.user_repo import UserRepository
 
 import ssl
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
 
 ssl_ctx = ssl.create_default_context()
 ssl_ctx.check_hostname = False

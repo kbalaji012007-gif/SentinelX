@@ -3,11 +3,18 @@ SentinelX AI – Auth API Router
 Endpoints for login, refresh token, logout, and current user profile.
 """
 
+from typing import Annotated
 from fastapi import APIRouter, Depends, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
-from app.schemas.auth_schema import LoginRequest, TokenResponse, RefreshTokenRequest
+from app.schemas.auth_schema import (
+    LoginRequest,
+    TokenResponse,
+    OAuth2TokenResponse,
+    RefreshTokenRequest,
+)
 from app.schemas.user_schema import UserResponse
 from app.services.auth_service import AuthService
 from app.models.user import User
@@ -26,6 +33,23 @@ async def login(
         email=payload.email,
         password=payload.password,
         remember_me=payload.remember_me,
+    )
+
+
+@router.post("/token", response_model=OAuth2TokenResponse, status_code=status.HTTP_200_OK)
+async def login_for_access_token(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    db: AsyncSession = Depends(get_db),
+) -> OAuth2TokenResponse:
+    """OAuth2 password flow token endpoint for Swagger UI authorization and OAuth2 clients."""
+    auth_service = AuthService(db)
+    tokens = await auth_service.authenticate_user(
+        email=form_data.username,
+        password=form_data.password,
+    )
+    return OAuth2TokenResponse(
+        access_token=tokens.access_token,
+        token_type=tokens.token_type,
     )
 
 

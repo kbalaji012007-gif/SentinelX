@@ -23,10 +23,15 @@ import AiAssistantPage from "../features/ai-assistant/AiAssistantPage";
 import AISOCPage from "../features/ai-soc/AISOCPage";
 import UsersPage from "../features/users/UsersPage";
 import SettingsPage from "../features/settings/SettingsPage";
+import AlertsPage from "../features/alerts/AlertsPage";
+import AlertToastContainer from "../components/realtime/AlertToast";
 
 function App() {
   return (
     <ErrorBoundary>
+      {/* Global real-time alert toast notifications – renders on all pages */}
+      <AlertToastContainer />
+
       <Routes>
         {/* Public Auth Routes */}
         <Route path="/login" element={<LoginPage />} />
@@ -57,6 +62,8 @@ function App() {
           <Route path="ai-soc" element={<AISOCPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          {/* Phase 6.4: Real-Time Security Alert Center */}
+          <Route path="alerts" element={<AlertsPage />} />
         </Route>
       </Routes>
     </ErrorBoundary>

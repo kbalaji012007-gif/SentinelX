@@ -58,8 +58,21 @@ import {
   fetchAIHistory,
 } from "../../services/aiSocService";
 import { fetchAgentStatistics } from "../../services/agentService";
+import { getAlertStatistics, getRecentAlerts } from "../../services/alertService";
+import { useRealtimeSOC } from "../../hooks/useRealtimeSOC";
+import { useAlertStore } from "../../stores/alertStore";
+import AlertDetailModal from "../../components/realtime/AlertDetailModal";
+import { useState } from "react";
+import { ShieldExclamationIcon, SignalIcon } from "@heroicons/react/24/outline";
+import { SEVERITY_COLORS, STATUS_COLORS } from "../../types/alert";
 
 export default function DashboardPage() {
+  const [selectedAlertUuid, setSelectedAlertUuid] = useState<string | null>(null);
+
+  // ── Real-Time SOC Connection (Phase 6.4) ─────────────────────────────────
+  const { connected: wsConnected, reconnecting: wsReconnecting } = useRealtimeSOC(true);
+  const { recentAlerts, telemetryEventCount, eventsPerSecond, lastEventAt } = useAlertStore();
+
   // ── 1. General Dashboard Queries ─────────────────────────────────────────
   const {
     data: summary,
@@ -271,6 +284,27 @@ export default function DashboardPage() {
   const aiHistoryItems = aiHistory?.items || [];
   const aiPlaybookRecs = aiRecs?.playbook_recommendations || [];
 
+  // ── Phase 6.4: Alert Statistics & Recent Alerts ───────────────────────────
+  const { data: alertStats } = useQuery({
+    queryKey: ["alert-statistics"],
+    queryFn: getAlertStatistics,
+    refetchInterval: 15000,
+  });
+  const { data: recentAlertsData } = useQuery({
+    queryKey: ["recent-alerts"],
+    queryFn: () => getRecentAlerts(10),
+    refetchInterval: 20000,
+    select: (data) => {
+      // Merge REST data into the live store for initial load
+      return data;
+    }
+  });
+
+  // Merge REST-fetched recent alerts into store if store is empty
+  const displayAlerts = recentAlerts.length > 0
+    ? recentAlerts
+    : (recentAlertsData ?? []);
+
   return (
     <div className="space-y-6 animate-fade-in pb-12">
       {/* Error Callout Banner */}
@@ -324,6 +358,184 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Real-Time Security Alert Center (Phase 6.4) ─────────────────────────────── */}
+      <div className="space-y-3">
+        {/* Section Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldExclamationIcon className="w-4 h-4 text-[var(--color-critical)]" />
+            <h2 className="text-sm font-extrabold text-[var(--color-text-primary)]">
+              Real-Time Security Alert Center
+            </h2>
+            {/* WS Status Badge */}
+            <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase font-mono ${
+              wsConnected
+                ? "bg-green-500/15 text-green-400"
+                : wsReconnecting
+                  ? "bg-yellow-500/15 text-yellow-400"
+                  : "bg-red-500/15 text-red-400"
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                wsConnected ? "bg-green-400 animate-pulse" : wsReconnecting ? "bg-yellow-400 animate-ping" : "bg-red-400"
+              }`} />
+              {wsConnected ? "Live" : wsReconnecting ? "Reconnecting…" : "Offline"}
+            </span>
+          </div>
+          <Link
+            to="/alerts"
+            className="text-[10px] font-bold text-[var(--color-primary-500)] hover:underline font-mono"
+          >
+            View All Alerts →
+          </Link>
+        </div>
+
+        {/* Alert Stats + Telemetry Stats Row */}
+        <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-9 gap-2">
+          {/* Alert stats */}
+          {[
+            { label: "Total", value: alertStats?.total_alerts ?? 0, color: "#60a5fa" },
+            { label: "New", value: alertStats?.new_alerts ?? 0, color: "#a78bfa" },
+            { label: "Critical", value: alertStats?.critical_alerts ?? 0, color: "#ef4444" },
+            { label: "High", value: alertStats?.high_alerts ?? 0, color: "#f97316" },
+            { label: "Today", value: alertStats?.alerts_today ?? 0, color: "#eab308" },
+            { label: "Investigating", value: alertStats?.active_investigations ?? 0, color: "#f59e0b" },
+          ].map(({ label, value, color }) => (
+            <div
+              key={label}
+              className="glass rounded-xl p-2.5 border border-[var(--color-border)] text-center"
+            >
+              <p className="text-[9px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider font-mono">{label}</p>
+              <p className="text-lg font-extrabold font-mono mt-0.5" style={{ color }}>{value}</p>
+            </div>
+          ))}
+
+          {/* Divider widget */}
+          <div className="glass rounded-xl p-2.5 border border-[var(--color-border)] flex flex-col items-center justify-center gap-1">
+            <SignalIcon className="w-4 h-4 text-[var(--color-primary-500)]" />
+            <p className="text-[9px] font-bold text-[var(--color-text-muted)] uppercase font-mono">Events/s</p>
+            <p className="text-lg font-extrabold font-mono text-[var(--color-primary-500)]">{eventsPerSecond}</p>
+          </div>
+
+          {/* Total telemetry widget */}
+          <div className="glass rounded-xl p-2.5 border border-[var(--color-border)] flex flex-col items-center justify-center gap-1">
+            <p className="text-[9px] font-bold text-[var(--color-text-muted)] uppercase font-mono">Telemetry</p>
+            <p className="text-lg font-extrabold font-mono text-[var(--color-safe)]">{telemetryEventCount}</p>
+            {lastEventAt && (
+              <p className="text-[8px] text-[var(--color-text-muted)] font-mono">
+                {new Date(lastEventAt).toLocaleTimeString()}
+              </p>
+            )}
+          </div>
+
+          {/* Resolved today */}
+          <div className="glass rounded-xl p-2.5 border border-[var(--color-border)] text-center">
+            <p className="text-[9px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider font-mono">Resolved</p>
+            <p className="text-lg font-extrabold font-mono text-[var(--color-safe)] mt-0.5">{alertStats?.resolved_today ?? 0}</p>
+          </div>
+        </div>
+
+        {/* Live Alert Feed */}
+        <div className="glass rounded-xl border border-[var(--color-border)] overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--color-surface-200)] border-b border-[var(--color-border)]">
+            <h3 className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider font-mono flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+              Live Alert Feed
+            </h3>
+            <span className="text-[9px] font-mono text-[var(--color-text-muted)]">
+              {displayAlerts.length} alerts
+            </span>
+          </div>
+
+          {displayAlerts.length === 0 ? (
+            <div className="p-8 text-center">
+              <ShieldExclamationIcon className="w-10 h-10 text-[var(--color-text-muted)] mx-auto mb-2 opacity-30" />
+              <p className="text-xs text-[var(--color-text-muted)]">No active security alerts.</p>
+              <p className="text-[10px] text-[var(--color-text-muted)] mt-0.5">
+                Alerts will appear here when threats are detected from your connected endpoints.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--color-border)]/50">
+              {displayAlerts.slice(0, 8).map((alert) => {
+                const sevColor = SEVERITY_COLORS[alert.severity as keyof typeof SEVERITY_COLORS] ?? "#6b7280";
+                return (
+                  <div
+                    key={alert.id}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-[var(--color-surface-200)]/50 transition-colors cursor-pointer group"
+                    onClick={() => setSelectedAlertUuid(alert.id)}
+                  >
+                    {/* Severity dot */}
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: sevColor }}
+                    />
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-[var(--color-text-primary)] truncate">
+                        {alert.title}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[9px] font-mono text-[var(--color-text-muted)]">
+                          {alert.hostname ?? alert.source ?? "Unknown"} • {alert.alert_type}
+                        </span>
+                        {alert.mitre_technique && (
+                          <span className="text-[8px] font-mono bg-[var(--color-surface-300)] px-1 rounded text-[var(--color-text-muted)]">
+                            {alert.mitre_technique}
+                          </span>
+                        )}
+                        {alert.occurrence_count > 1 && (
+                          <span className="text-[9px] font-mono bg-blue-500/10 px-1 rounded text-blue-400">
+                            ×{alert.occurrence_count}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Severity badge */}
+                    <span
+                      className="px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase font-mono shrink-0"
+                      style={{ backgroundColor: `${sevColor}20`, color: sevColor }}
+                    >
+                      {alert.severity}
+                    </span>
+
+                    {/* Status badge */}
+                    <span
+                      className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase font-mono shrink-0"
+                      style={{
+                        backgroundColor: `${STATUS_COLORS[alert.status as keyof typeof STATUS_COLORS] ?? "#6b7280"}20`,
+                        color: STATUS_COLORS[alert.status as keyof typeof STATUS_COLORS] ?? "#6b7280",
+                      }}
+                    >
+                      {alert.status}
+                    </span>
+
+                    {/* Time */}
+                    <span className="text-[9px] font-mono text-[var(--color-text-muted)] shrink-0 hidden md:block">
+                      {(() => {
+                        const diff = Date.now() - new Date(alert.detected_at).getTime();
+                        if (diff < 60000) return "just now";
+                        if (diff < 3600000) return `${Math.round(diff / 60000)}m ago`;
+                        return `${Math.round(diff / 3600000)}h ago`;
+                      })()}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Alert Detail Modal */}
+      {selectedAlertUuid && (
+        <AlertDetailModal
+          alertUuid={selectedAlertUuid}
+          onClose={() => setSelectedAlertUuid(null)}
+        />
+      )}
 
       {/* ── AI SOC & Copilot Telemetry Grid (5 Section 8 Widgets) ───────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">

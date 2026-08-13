@@ -24,6 +24,13 @@ class TokenResponse(BaseModel):
     user: UserResponse = Field(..., description="Authenticated user profile details")
 
 
+class OAuth2TokenResponse(BaseModel):
+    """OAuth2 specification compliant token response schema for Swagger UI."""
+
+    access_token: str = Field(..., description="JWT access token")
+    token_type: str = Field(default="bearer", description="Token type")
+
+
 class RefreshTokenRequest(BaseModel):
     """Schema for requesting a new access token using refresh token."""
 
