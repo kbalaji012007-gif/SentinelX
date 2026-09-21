@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ServerIcon,
@@ -11,20 +11,74 @@ import {
   ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
 import { fetchAssets } from "../../services/assetService";
+import { fetchAgents } from "../../services/agentService";
 import type { Asset } from "../../types/asset";
 
 export default function AssetsPage() {
   const [search, setSearch] = useState("");
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
 
-  // Fetch real assets from backend API
-  const { data: assets = [], isLoading, isError, refetch } = useQuery({
+  // Fetch real assets from backend database
+  const {
+    data: dbAssets = [],
+    isLoading: isAssetsLoading,
+    isError: isAssetsError,
+    refetch: refetchAssets,
+  } = useQuery({
     queryKey: ["assets"],
     queryFn: () => fetchAssets(0, 100),
-    refetchInterval: 30000,
+    refetchInterval: 15000,
   });
 
-  // Calculate real summary statistics from live data
+  // Fetch live enrolled endpoint agents (e.g. host machines reporting telemetry)
+  const {
+    data: agentsData,
+    isLoading: isAgentsLoading,
+    refetch: refetchAgents,
+  } = useQuery({
+    queryKey: ["agents", { page: 1, page_size: 100 }],
+    queryFn: () => fetchAgents({ page: 1, page_size: 100 }),
+    refetchInterval: 15000,
+  });
+
+  const isLoading = isAssetsLoading || isAgentsLoading;
+
+  // Merge registered enterprise database assets + live enrolled endpoint telemetry agents
+  const assets = useMemo<Asset[]>(() => {
+    const list = [...dbAssets];
+    if (agentsData?.items) {
+      for (const agent of agentsData.items) {
+        // Skip revoked duplicate agents
+        if (agent.status === "Revoked") continue;
+        // Avoid duplicate if already registered in dbAssets
+        if (list.some((a) => a.hostname.toLowerCase() === agent.hostname.toLowerCase())) continue;
+
+        list.push({
+          id: agent.id || agent.agent_id,
+          hostname: agent.hostname,
+          asset_name: `${agent.hostname} (${agent.platform} Workstation)`,
+          asset_type: "Workstation",
+          operating_system: agent.os_version || agent.platform,
+          ip_address: agent.local_ip || "127.0.0.1",
+          department: "Endpoint Security Fleet",
+          criticality: agent.risk_score > 20 ? "High" : "Medium",
+          status:
+            agent.status === "Online"
+              ? "Active"
+              : agent.status === "Stale"
+              ? "Maintenance"
+              : "Inactive",
+          last_seen: agent.last_seen || undefined,
+          created_at: agent.last_seen || new Date().toISOString(),
+          updated_at: agent.last_seen || new Date().toISOString(),
+          tags: ["Endpoint Agent", agent.status],
+        });
+      }
+    }
+    return list;
+  }, [dbAssets, agentsData]);
+
+  // Calculate live summary statistics from real active data
   const serversCount = assets.filter((a) => a.asset_type === "Server").length;
   const workstationsCount = assets.filter((a) => a.asset_type === "Workstation").length;
   const cloudCount = assets.filter((a) => a.asset_type === "Cloud Resource").length;
@@ -45,6 +99,11 @@ export default function AssetsPage() {
     );
   });
 
+  const handleRefresh = () => {
+    refetchAssets();
+    refetchAgents();
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -56,7 +115,7 @@ export default function AssetsPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => refetch()}
+            onClick={handleRefresh}
             className="p-2 rounded-lg bg-[var(--color-surface-200)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
             title="Refresh assets"
           >
@@ -124,7 +183,7 @@ export default function AssetsPage() {
                   Loading real-time asset inventory...
                 </td>
               </tr>
-            ) : isError ? (
+            ) : isAssetsError ? (
               <tr>
                 <td colSpan={8} className="p-8 text-center text-[var(--color-critical)]">
                   Failed to load asset data from server. Please check backend connection.
@@ -235,10 +294,6 @@ export default function AssetsPage() {
                 <span className="text-[var(--color-primary-500)] font-bold">{selectedAsset.ip_address}</span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-[var(--color-border)]/50">
-                <span className="text-[var(--color-text-muted)]">MAC Address:</span>
-                <span className="text-[var(--color-text-primary)]">{selectedAsset.mac_address || "N/A"}</span>
-              </div>
-              <div className="flex justify-between py-1.5 border-b border-[var(--color-border)]/50">
                 <span className="text-[var(--color-text-muted)]">Operating System:</span>
                 <span className="text-[var(--color-text-primary)]">{selectedAsset.operating_system || "Unknown"}</span>
               </div>
@@ -254,6 +309,14 @@ export default function AssetsPage() {
                 <span className="text-[var(--color-text-muted)]">Status:</span>
                 <span className="text-[var(--color-safe)] font-bold">{selectedAsset.status}</span>
               </div>
+              {selectedAsset.last_seen && (
+                <div className="flex justify-between py-1.5 border-b border-[var(--color-border)]/50">
+                  <span className="text-[var(--color-text-muted)]">Last Seen / Heartbeat:</span>
+                  <span className="text-[var(--color-primary-500)] font-bold">
+                    {new Date(selectedAsset.last_seen).toLocaleTimeString()}
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between py-1.5 border-b border-[var(--color-border)]/50">
                 <span className="text-[var(--color-text-muted)]">Created At:</span>
                 <span className="text-[var(--color-text-primary)]">
