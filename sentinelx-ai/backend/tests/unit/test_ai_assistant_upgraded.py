@@ -1451,5 +1451,268 @@ async def test_regression_revoked_endpoint_reported_accurately():
     assert "Active (Not Disabled)" not in res["response_markdown"]
 
 
+@pytest.mark.asyncio
+async def test_regression_stale_heartbeat_derived_from_threshold():
+    """Requirement 1 & 5: Derive heartbeat freshness from actual timestamp and threshold, showing Stale."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    # 20 days ago (stale)
+    stale_dt = datetime.now(timezone.utc) - timedelta(days=20)
+    agent_stale = EndpointAgent(
+        id=UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7"),
+        agent_id="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",  # Stored administrative status is Online
+        last_seen=stale_dt,
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_stale
+            m.scalars.return_value.all.return_value = [agent_stale]
+            m.scalar_one_or_none.return_value = agent_stale
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query("b7210744-d5cc-4563-ad2f-5b0d4d6be586")
+    md = res["response_markdown"]
+
+    # Verify stored status and actual connectivity are distinguished
+    assert "- **Agent Status:** `Online`" in md
+    assert "Actual Connectivity:** `Stale (Last seen 20 days ago)`" in md
+    assert "Historical Endpoint Telemetry" in md
+    assert "Heartbeat Stale:" in md
+    # Must never claim live telemetry stream or active ingestion for stale endpoint
+    assert "Live agent telemetry stream verified" not in md
+    assert "EDR Ingestion Active (Live Stream)" not in md
+
+
+@pytest.mark.asyncio
+async def test_regression_correct_windows_event_id_and_record_id_labeling():
+    """Requirement 2 & 5: Display actual Windows Event ID when present and record ID separately."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    agent_id_uuid = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    agent = EndpointAgent(
+        id=agent_id_uuid,
+        agent_id="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    tel_id = UUID("11111111-2222-3333-4444-555555555555")
+    tel = AgentTelemetry(
+        id=tel_id,
+        agent_id=agent_id_uuid,
+        event_type="Process_Creation",
+        severity="INFO",
+        event_timestamp=datetime.now(timezone.utc),
+        source="AgentTelemetry (SHETTY)",
+        payload={"process_name": "notepad.exe", "event_id": "4688", "pid": 1234},
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent
+            m.scalars.return_value.all.return_value = [agent]
+            m.scalar_one_or_none.return_value = agent
+        elif "agent_telemetry" in s_str:
+            m.scalars.return_value.all.return_value = [tel]
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query("b7210744-d5cc-4563-ad2f-5b0d4d6be586")
+    md = res["response_markdown"]
+
+    # Must contain columns Windows Event ID and Record ID
+    assert "| Windows Event ID | Record ID |" in md
+    # Windows Event ID column contains 4688, Record ID column contains 11111111
+    assert "| `4688` | `11111111` |" in md
+
+
+@pytest.mark.asyncio
+async def test_regression_missing_windows_event_id_displays_not_available():
+    """Requirement 2 & 5: When no Windows Event ID exists, displays Not available without labeling hashes as event IDs."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    agent_id_uuid = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    agent = EndpointAgent(
+        id=agent_id_uuid,
+        agent_id="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    tel_id = UUID("99998888-7777-6666-5555-444433332222")
+    tel = AgentTelemetry(
+        id=tel_id,
+        agent_id=agent_id_uuid,
+        event_type="network_connection",
+        severity="INFO",
+        event_timestamp=datetime.now(timezone.utc),
+        source="NetworkCollector",
+        payload={"pid": 12296, "protocol": "TCP", "local_port": 61214},  # No event_id
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent
+            m.scalars.return_value.all.return_value = [agent]
+            m.scalar_one_or_none.return_value = agent
+        elif "agent_telemetry" in s_str:
+            m.scalars.return_value.all.return_value = [tel]
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query("b7210744-d5cc-4563-ad2f-5b0d4d6be586")
+    md = res["response_markdown"]
+
+    # Must display 'Not available' for the event ID and short UUID for Record ID
+    assert "| `Not available` | `99998888` |" in md
+    # Ensure generated hash is never labeled as event ID
+    assert "| `99998888` |" not in md.replace("| `Not available` | `99998888` |", "")
+
+
+@pytest.mark.asyncio
+async def test_regression_deduplication_of_correlated_telemetry_and_log_records():
+    """Requirement 3 & 5: Deduplicate correlated agent telemetry and log records and avoid counting twice."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    agent_id_uuid = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    agent = EndpointAgent(
+        id=agent_id_uuid,
+        agent_id="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    now_ts = datetime.now(timezone.utc)
+    tel_id = UUID("aaaaaaaa-1111-2222-3333-444444444444")
+    log_id = UUID("bbbbbbbb-5555-6666-7777-888888888888")
+
+    # Correlated telemetry and forwarded log entry
+    tel = AgentTelemetry(
+        id=tel_id,
+        agent_id=agent_id_uuid,
+        event_type="network_connection",
+        severity="INFO",
+        event_timestamp=now_ts,
+        source="NetworkCollector",
+        payload={"pid": 12296, "protocol": "TCP", "local_port": 50061},
+    )
+    log_entry = LogEntry(
+        id=log_id,
+        source_id=uuid4(),
+        event_type="network_connection",
+        log_level="INFO",
+        event_timestamp=now_ts,
+        message="Endpoint network_connection on SHETTY",
+        raw_log={"pid": 12296, "protocol": "TCP", "local_port": 50061},
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent
+            m.scalars.return_value.all.return_value = [agent]
+            m.scalar_one_or_none.return_value = agent
+        elif "agent_telemetry" in s_str:
+            m.scalars.return_value.all.return_value = [tel]
+        elif "log_entries" in s_str:
+            m.scalars.return_value.all.return_value = [log_entry]
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query("b7210744-d5cc-4563-ad2f-5b0d4d6be586")
+    md = res["response_markdown"]
+
+    # Link representation is present
+    assert "🔗 Telemetry `aaaaaaaa`" in md
+    # Deduplication note and accounting: 1 unique event observed
+    assert "1 unique underlying events" in md or "1 unique underlying event" in md
+    assert "deduplicated in unique event accounting" in md
+
+
+@pytest.mark.asyncio
+async def test_regression_unsupported_health_claims_prevented_for_stale_endpoint():
+    """Requirement 4 & 5: No claims of active health or active ingestion when endpoint is stale."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    # 15 days ago
+    stale_seen = datetime.now(timezone.utc) - timedelta(days=15)
+    agent = EndpointAgent(
+        id=UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7"),
+        agent_id="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=stale_seen,
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent
+            m.scalars.return_value.all.return_value = [agent]
+            m.scalar_one_or_none.return_value = agent
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query("What is the status of host SHETTY?")
+    md = res["response_markdown"]
+
+    # Must NOT claim healthy baseline or active ingestion
+    assert "Endpoint baseline is operating normally with live telemetry stream verified" not in md
+    assert "EDR Ingestion Active (Live Stream)" not in md
+    # Must report limitations and verify connectivity recommendation
+    assert "Coverage Limitation:" in md
+    assert "Verify Agent Connectivity:" in md
+
+
 
 

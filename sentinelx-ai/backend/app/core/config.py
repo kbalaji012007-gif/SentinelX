@@ -134,6 +134,8 @@ class Settings(BaseSettings):
     ALERT_DEDUP_WINDOW_SECONDS: int = 300
     # Number of failed login events before escalating to HIGH severity
     ALERT_DEDUP_FAILED_LOGIN_THRESHOLD: int = 3
+    # Configurable threshold in minutes beyond which an agent's heartbeat is considered Stale
+    AGENT_HEARTBEAT_STALE_MINUTES: int = 15
 
 
 settings = Settings()

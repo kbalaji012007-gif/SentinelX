@@ -255,10 +255,16 @@ class AICopilotService:
                 confidence_reason = "Endpoint could not be uniquely identified in database records."
                 response_markdown = self._format_unresolved_endpoint_response(query, raw_results.get("error"), raw_results.get("candidate_hosts", []))
             else:
+                is_stale = verif.get("is_stale", False)
+                age_str = verif.get("last_seen_age", "Unknown")
+                dedup = verif.get("dedup_summary", {})
+                unique_events = dedup.get("unique_events_count", len(telemetry))
+
                 observed_data.append(f"Identified endpoint: '{host_info['hostname']}' (ID: {host_info['agent_id']}, Platform: {host_info['platform']}).")
                 observed_data.append(
-                    f"Verified Host State: Connectivity={verif.get('connectivity_status')}, "
-                    f"Agent Disablement={'Yes' if verif.get('agent_disabled') else 'No'}, "
+                    f"Verified Host State: Stored DB Status={verif.get('connectivity_status')}, "
+                    f"Actual Connectivity={verif.get('actual_connectivity')}, "
+                    f"Last Heartbeat={verif.get('last_seen')} ({age_str}), "
                     f"Host Isolation={'Isolated' if verif.get('host_isolated') else 'Not Isolated'} ({verif.get('isolation_note')})."
                 )
 
@@ -278,6 +284,9 @@ class AICopilotService:
                     for l in log_entries[:3]:
                         observed_data.append(f"- [{l.get('event_timestamp')}] {l.get('event_type')} ({l.get('severity')})")
 
+                if telemetry or log_entries:
+                    observed_data.append(f"Correlation / Deduplication: Correlated {len(telemetry)} telemetry record(s) and {len(log_entries)} log entry/entries into {unique_events} unique underlying event(s).")
+
                 # MITRE ATT&CK - Strictly only include observed detections
                 if observed_mitre:
                     for m in observed_mitre:
@@ -293,14 +302,21 @@ class AICopilotService:
                 if alerts or any(t.get("severity") in ("ERROR", "CRITICAL") for t in telemetry):
                     ai_inferences.append("Host exhibits anomalous execution activity requiring triage. Attack success is not confirmed until endpoint disk forensics are completed.")
                     confidence_score = 92
-                    confidence_reason = "Direct match from live agent_telemetry, log_entries, and security_alerts records."
+                    confidence_reason = "Direct match from agent_telemetry, log_entries, and security_alerts records."
+                elif is_stale:
+                    ai_inferences.append(f"Endpoint heartbeat is Stale ({age_str}). Queried historical telemetry records indicate no active compromise, but current real-time health cannot be verified.")
+                    confidence_score = 88
+                    confidence_reason = f"Verified historical records from last active session. Endpoint connectivity is Stale ({age_str})."
                 elif telemetry or log_entries:
                     ai_inferences.append("Endpoint is active with baseline telemetry; no critical alert thresholds breached.")
-                    confidence_score = 88
+                    confidence_score = 90
                     confidence_reason = "Direct match from live agent_telemetry and log_entries records."
                 else:
                     insufficient_evidence = f"0 security events or anomalous telemetry records were recorded for host '{host_info['hostname']}' in the database."
-                    ai_inferences.append("Endpoint is operating within normal baseline limits with no active indicators of compromise.")
+                    if is_stale:
+                        ai_inferences.append(f"No records found for endpoint. Endpoint is currently Stale (last seen {age_str}).")
+                    else:
+                        ai_inferences.append("Endpoint is operating within normal baseline limits with no active indicators of compromise.")
                     confidence_score = 90
                     confidence_reason = "Verified against database: Zero matching records in agent_telemetry and log_entries."
 
@@ -606,79 +622,102 @@ class AICopilotService:
         platform = host_info.get("platform", "Windows")
         os_ver = host_info.get("os_version", "Windows 11")
         agent_ver = host_info.get("agent_version", "1.0.0")
-        conn_status = host_info.get("status") or verification.get("connectivity_status", "Unknown")
+
+        stored_status = host_info.get("status") or verification.get("connectivity_status", "Unknown")
+        actual_conn = verification.get("actual_connectivity") or stored_status
+        last_seen = verification.get("last_seen") or "Unknown"
+        age_str = verification.get("last_seen_age", "Unknown")
+        is_stale = verification.get("is_stale", False)
+        agent_disabled = verification.get("agent_disabled", False)
+        is_isolated = verification.get("host_isolated", False)
+        iso_note = verification.get("isolation_note", "Host is NOT verified as isolated.")
+        dedup = verification.get("dedup_summary", {})
+        unique_events = dedup.get("unique_events_count", len(telemetry))
 
         md = f"### 💻 Host Security Records: `{host}` (`{agent_id}`)\n\n"
         md += f"- **Operating Platform:** {platform} ({os_ver})\n"
         md += f"- **Agent Version:** {agent_ver}\n"
-        md += f"- **Agent Status:** `{conn_status}`\n\n"
+        md += f"- **Agent Status:** `{stored_status}`\n"
+        md += f"- **Actual Connectivity:** `{actual_conn}`\n\n"
 
-        # Verification section - accurately distinguish states without guessing recent heartbeats
-        last_seen = verification.get("last_seen") or "Unknown"
-        agent_disabled = verification.get("agent_disabled", False)
-        is_isolated = verification.get("host_isolated", False)
-        iso_note = verification.get("isolation_note", "Host is NOT verified as isolated.")
-
-        status_str = str(conn_status).strip().lower()
-        if status_str == "revoked":
+        # Verification section - accurately distinguish stored administrative status from actual recent connectivity
+        status_clean = str(stored_status).strip().lower()
+        if status_clean == "revoked":
             edr_label = "Revoked by Administrator"
             edr_eval = "Agent certificate revoked by administrator; telemetry ingestion blocked."
-        elif status_str == "disabled":
+            safeguard_state = "Revoked (Ingestion Blocked)"
+        elif status_clean == "disabled":
             edr_label = "Disabled by Administrator"
             edr_eval = "Agent disabled by administrator; telemetry ingestion halted."
-        elif status_str == "offline":
-            edr_label = "Active (Agent Offline)"
-            edr_eval = "Endpoint is offline; telemetry ingestion paused."
-        elif status_str == "online":
-            edr_label = "Active (Not Disabled)"
-            edr_eval = "Live agent telemetry link verified."
+            safeguard_state = "Disabled (Ingestion Halted)"
+        elif status_clean == "offline":
+            edr_label = "Active Registration (Offline)"
+            edr_eval = f"Endpoint is offline; last seen {age_str}."
+            safeguard_state = "Offline (Ingestion Paused)"
+        elif is_stale:
+            edr_label = "Active Registration (Heartbeat Stale)"
+            edr_eval = f"No heartbeat received for {age_str}. Real-time ingestion is currently inactive."
+            safeguard_state = f"Ingestion Inactive / Stale ({age_str})"
         else:
-            edr_label = "Disabled by Admin (Revoked)" if agent_disabled else "Active (Not Disabled)"
-            edr_eval = "Live agent telemetry link"
+            edr_label = "Active (Live Heartbeat)"
+            edr_eval = f"Live agent telemetry stream verified (last seen {age_str})."
+            safeguard_state = "EDR Ingestion Active (Live Stream)"
 
         md += "#### 🛡️ Endpoint & Safeguard State Verification\n\n"
         md += "| Safeguard / Verification Dimension | Verified State | Evaluation Detail |\n"
         md += "| :--- | :--- | :--- |\n"
-        md += f"| **Endpoint Connectivity** | `{conn_status}` | Last seen: {last_seen} |\n"
-        md += f"| **EDR Agent Disablement** | `{edr_label}` | {edr_eval} |\n"
+        md += f"| **Endpoint Connectivity** | `{actual_conn}` | Stored: `{stored_status}`; Last seen: {last_seen} ({age_str}) |\n"
+        md += f"| **EDR Agent Status** | `{edr_label}` | {edr_eval} |\n"
         md += f"| **Host Network Isolation** | `{'Isolated (Verified via SOAR)' if is_isolated else 'Not Isolated (Unverified)'}` | {iso_note} |\n"
-        md += f"| **Active Safeguards** | `{'Network Isolation Active' if is_isolated else 'EDR Ingestion Active (Not Quarantined)'}` | Checked against SOAR execution history |\n\n"
+        md += f"| **Active Safeguards** | `{'Network Isolation Active' if is_isolated else safeguard_state}` | Checked against agent telemetry state and SOAR execution history |\n\n"
 
-        # 1. Endpoint Telemetry Section (Clearly distinguished from Correlated Logs)
-        md += "#### 🛰️ Live Endpoint Telemetry (`sentinelx.agent_telemetry`)\n\n"
+        if is_stale:
+            md += f"> [!WARNING]\n"
+            md += f"> **Heartbeat Stale:** Endpoint `{host}` last reported a heartbeat {age_str} ({last_seen}). Displayed records reflect historical telemetry from the last active session, not live streams.\n\n"
+
+        # 1. Endpoint Telemetry Section (Clearly distinguished with Windows Event ID vs Record ID)
+        section_title = "Historical Endpoint Telemetry" if is_stale else "Live Endpoint Telemetry"
+        md += f"#### 🛰️ {section_title} (`sentinelx.agent_telemetry`)\n\n"
         display_tel_count = min(len(telemetry), limit)
         if telemetry:
-            md += f"Retrieved **{display_tel_count}** newest telemetry records (sorted by actual timestamp):\n\n"
-            md += "| Timestamp (UTC) | Event ID | Severity | Source | Event Type | Relevant Payload Fields |\n"
-            md += "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+            md += f"Retrieved **{display_tel_count}** telemetry records (sorted by actual timestamp):\n\n"
+            md += "| Timestamp (UTC) | Windows Event ID | Record ID | Severity | Source | Event Type | Relevant Payload Fields |\n"
+            md += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
             for t in telemetry[:display_tel_count]:
                 ts = t.get("event_timestamp") or "N/A"
-                evt_id = t.get("event_id") or t.get("id", "N/A")[:8]
+                win_eid = t.get("windows_event_id") or "Not available"
+                rec_id = t.get("record_id") or str(t.get("id", "N/A"))[:8]
                 sev = t.get("severity", "INFO")
                 src = t.get("source", f"AgentTelemetry ({host})")
                 etype = t.get("event_type", "Telemetry")
                 details = t.get("details", "Standard event")
-                md += f"| `{ts}` | `{evt_id}` | `{sev}` | `{src}` | `{etype}` | {details} |\n"
+                md += f"| `{ts}` | `{win_eid}` | `{rec_id}` | `{sev}` | `{src}` | `{etype}` | {details} |\n"
             md += "\n"
         else:
             md += "✅ **Zero (0) matching records were found in `sentinelx.agent_telemetry` for this endpoint.**\n\n"
 
-        # 2. Correlated Security Logs Section
+        # 2. Correlated Security Logs Section (Clearly labeled and linked)
         md += "#### 📜 Correlated Security Logs (`sentinelx.log_entries`)\n\n"
         display_log_count = min(len(log_entries), limit)
         if log_entries:
-            md += f"Retrieved **{display_log_count}** newest correlated security log records (sorted by actual timestamp):\n\n"
-            md += "| Timestamp (UTC) | Event ID | Severity | Source | Event Type | Relevant Payload Fields |\n"
-            md += "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+            md += f"Retrieved **{display_log_count}** correlated security log records (sorted by actual timestamp):\n\n"
+            md += "| Timestamp (UTC) | Windows Event ID | Record ID | Severity | Source | Event Type | Correlated Source | Relevant Payload Fields |\n"
+            md += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
             for l in log_entries[:display_log_count]:
                 ts = l.get("event_timestamp") or "N/A"
-                evt_id = l.get("event_id") or l.get("id", "N/A")[:8]
+                win_eid = l.get("windows_event_id") or "Not available"
+                rec_id = l.get("record_id") or str(l.get("id", "N/A"))[:8]
                 sev = l.get("severity", "INFO")
                 src = l.get("source", "sentinelx.log_entries")
                 etype = l.get("event_type", "Log")
                 details = l.get("details", "Log event")
-                md += f"| `{ts}` | `{evt_id}` | `{sev}` | `{src}` | `{etype}` | {details} |\n"
+                corr_tel = l.get("correlated_telemetry_record_id")
+                corr_label = f"🔗 Telemetry `{corr_tel}`" if corr_tel else "Direct Log Source"
+                md += f"| `{ts}` | `{win_eid}` | `{rec_id}` | `{sev}` | `{src}` | `{etype}` | {corr_label} | {details} |\n"
             md += "\n"
+
+            if dedup.get("correlated_count", 0) > 0:
+                md += f"*(Note: {dedup.get('correlated_count')} log entries are correlated representations of agent telemetry records and are deduplicated in unique event accounting: **{unique_events} unique underlying events** observed).* \n\n"
         else:
             md += "✅ **Zero (0) matching records were found in `sentinelx.log_entries` for this endpoint.**\n\n"
 
@@ -700,38 +739,21 @@ class AICopilotService:
             for ah in analytical_hypotheses:
                 md += f"- **Analytical Hypothesis (Unconfirmed by Detection Rules):** `{ah['technique_id']}` — {ah['name']} (*{ah.get('rationale', '')}*)\n"
         if not observed_mitre and not analytical_hypotheses:
-            md += "- **Detection Engine Status:** No MITRE ATT&CK techniques have been observed in detection records or telemetry for this endpoint.\n"
+            md += "- **Detection Engine Status:** No MITRE ATT&CK techniques have been observed in records for this endpoint.\n"
         md += "\n"
 
-        # 5. Recommended Next Steps
-        md += "#### 🎯 Recommended Next Steps\n"
+        # 5. Recommended Next Steps & Health Evaluation
+        md += "#### 🎯 Security Assessment & Recommended Next Steps\n"
         if alerts or any(t.get('severity') in ('ERROR', 'CRITICAL') for t in telemetry):
             md += f"1. **Host Containment:** Recommended SOAR action `Isolate_Host` for `{host}` if malicious persistence is confirmed. *(Note: Host is currently NOT isolated — execution requires authorized confirmation).* \n"
             md += "2. **Process Inspection:** Review parent-child process tree and collect non-volatile memory artifacts.\n"
+        elif is_stale:
+            md += f"- **Assessment:** No malicious indicators or critical alerts were identified in the {display_tel_count} historical telemetry records from the last active session.\n"
+            md += f"- **Coverage Limitation:** Endpoint `{host}` is currently **Stale** (last seen {age_str}). Current live health and active telemetry cannot be confirmed until endpoint connectivity resumes.\n"
+            md += f"1. **Verify Agent Connectivity:** Check host network connectivity and ensure the SentinelX Agent service is running on `{host}`.\n"
+            md += "2. **Re-evaluate Upon Reconnection:** Conduct a fresh telemetry review once the agent transmits a current heartbeat.\n"
         else:
-            md += "Endpoint baseline is healthy. Telemetry agent is operating normally with no active containment actions required.\n"
-
-        return md
-
-        # MITRE ATT&CK Mapping
-        md += "#### 🥋 MITRE ATT&CK Mapping\n"
-        if observed_mitre:
-            for m in observed_mitre:
-                md += f"- **Observed Detection:** `{m['technique_id']}` — {m['name']} (Tactic: `{m['tactic']}`, Alert: `{m.get('alert_id', 'N/A')}`)\n"
-        if analytical_hypotheses:
-            for ah in analytical_hypotheses:
-                md += f"- **Analytical Hypothesis (Unconfirmed by Detection Rules):** `{ah['technique_id']}` — {ah['name']} (*{ah.get('rationale', '')}*)\n"
-        if not observed_mitre and not analytical_hypotheses:
-            md += "- **Detection Engine Status:** No MITRE ATT&CK techniques have been observed in detection records or telemetry for this endpoint.\n"
-        md += "\n"
-
-        # Recommended Next Steps
-        md += "#### 🎯 Recommended Next Steps\n"
-        if alerts or any(ev['severity'] in ('ERROR', 'CRITICAL') for ev in all_events):
-            md += f"1. **Host Containment:** Recommended SOAR action `Isolate_Host` for `{host}` if malicious persistence is confirmed. *(Note: Host is currently NOT isolated — execution requires authorized confirmation).* \n"
-            md += "2. **Process Inspection:** Review parent-child process tree and collect non-volatile memory artifacts.\n"
-        else:
-            md += "Endpoint baseline is healthy. Telemetry agent is operating normally with no active containment actions required.\n"
+            md += "Endpoint baseline is operating normally with live telemetry stream verified. No containment actions required.\n"
 
         return md
 

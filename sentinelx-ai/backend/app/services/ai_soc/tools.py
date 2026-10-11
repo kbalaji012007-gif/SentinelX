@@ -21,9 +21,9 @@ from app.models.asset import Asset
 from app.models.user import User
 from app.models.soar_execution import SOARExecutionStep, SOARExecutionResult
 from app.models.correlation import ThreatCorrelation, AttackChain, MitreMapping
-from app.models.threat_intelligence import MitreTechnique, IOCReputation
 from app.services.soar_service import SOARService
 from app.services.soar.actions import ACTION_REGISTRY
+from app.core.config import settings
 
 
 class SecurityAssistantTools:
@@ -427,15 +427,30 @@ class SecurityAssistantTools:
                         details_parts.append(f"{k}: {payload[k]}")
                 details_str = ", ".join(details_parts[:4]) if details_parts else "Standard telemetry payload"
 
+                # Display the actual Windows Event ID only when one exists; never label UUIDs/hashes as event IDs
+                raw_eid = payload.get("event_id") or payload.get("EventID") or payload.get("event_data", {}).get("EventID")
+                if raw_eid is not None and str(raw_eid).strip() != "":
+                    windows_event_id = str(raw_eid).strip()
+                    has_windows_event_id = True
+                else:
+                    windows_event_id = "Not available"
+                    has_windows_event_id = False
+
+                record_id = str(t.id)[:8]
+
                 telemetry_events.append({
                     "id": str(t.id),
-                    "event_id": str(payload.get("event_id") or str(t.id)[:8]),
+                    "record_id": record_id,
+                    "event_id": windows_event_id,
+                    "windows_event_id": windows_event_id,
+                    "has_windows_event_id": has_windows_event_id,
                     "event_type": t.event_type,
                     "severity": t.severity,
                     "event_timestamp": t.event_timestamp.isoformat() if t.event_timestamp else None,
                     "payload": payload,
                     "source": t.source or f"AgentTelemetry ({agent_match.hostname})",
                     "details": details_str,
+                    "correlated_log_id": None,
                 })
 
             # 3. Query related LogEntries via LogSource, Asset, and Hostname
@@ -470,10 +485,23 @@ class SecurityAssistantTools:
             log_events: List[Dict[str, Any]] = []
             for l in log_res.scalars().all():
                 source_display = source_map.get(l.source_id, "sentinelx.log_entries")
+                raw_payload = dict(l.raw_log or {})
+                raw_eid = l.event_id or raw_payload.get("event_id") or raw_payload.get("EventID") or raw_payload.get("event_data", {}).get("EventID")
+                if raw_eid is not None and str(raw_eid).strip() != "":
+                    windows_event_id = str(raw_eid).strip()
+                    has_windows_event_id = True
+                else:
+                    windows_event_id = "Not available"
+                    has_windows_event_id = False
+
+                record_id = str(l.id)[:8]
 
                 log_events.append({
                     "id": str(l.id),
-                    "event_id": str(l.event_id or str(l.id)[:8]),
+                    "record_id": record_id,
+                    "event_id": windows_event_id,
+                    "windows_event_id": windows_event_id,
+                    "has_windows_event_id": has_windows_event_id,
                     "event_type": l.event_type,
                     "severity": l.log_level,
                     "event_timestamp": l.event_timestamp.isoformat() if l.event_timestamp else None,
@@ -486,9 +514,42 @@ class SecurityAssistantTools:
                         "destination_ip": l.destination_ip,
                         "event_id": l.event_id,
                         "category": l.category,
+                        "raw_log": raw_payload,
                     },
-                    "details": l.message or f"Event {l.event_type} (ID: {l.event_id})",
+                    "details": l.message or f"Event {l.event_type} (Record: {record_id})",
+                    "is_correlated_from_telemetry": False,
+                    "correlated_telemetry_record_id": None,
                 })
+
+            # 3.1 Deduplicate and cross-correlate agent_telemetry with forwarded log_entries
+            correlated_telemetry_ids = set()
+            for l in log_events:
+                l_ts = l.get("event_timestamp")
+                l_type = (l.get("event_type") or "").lower()
+                l_raw = l.get("payload", {}).get("raw_log", {})
+                l_pid = l_raw.get("pid")
+                l_proc = l.get("payload", {}).get("process_name") or l_raw.get("process_name")
+
+                for t in telemetry_events:
+                    t_ts = t.get("event_timestamp")
+                    t_type = (t.get("event_type") or "").lower()
+                    t_payload = t.get("payload", {})
+                    t_pid = t_payload.get("pid")
+                    t_proc = t_payload.get("process_name")
+
+                    if l_ts and t_ts and l_ts == t_ts and l_type == t_type:
+                        if l_pid is not None and t_pid is not None and l_pid != t_pid:
+                            continue
+                        if l_proc is not None and t_proc is not None and str(l_proc).lower() != str(t_proc).lower():
+                            continue
+
+                        l["is_correlated_from_telemetry"] = True
+                        l["correlated_telemetry_record_id"] = t["record_id"]
+                        t["correlated_log_id"] = l["record_id"]
+                        correlated_telemetry_ids.add(t["record_id"])
+                        break
+
+            unique_events_count = len(telemetry_events) + sum(1 for l in log_events if not l.get("is_correlated_from_telemetry"))
 
             # 4. Query SecurityAlerts linked to agent
             alt_stmt = (
@@ -582,29 +643,75 @@ class SecurityAssistantTools:
             is_offline = status_clean.lower() == "offline"
             is_online = status_clean.lower() == "online"
 
-            edr_telemetry_status = "Active"
+            # Derive heartbeat freshness from actual last_seen timestamp & configurable threshold
+            stale_threshold_minutes = getattr(settings, "AGENT_HEARTBEAT_STALE_MINUTES", 15)
+            is_stale = False
+            heartbeat_age_str = "Never seen"
+            heartbeat_minutes: Optional[int] = None
+            now_utc = datetime.now(timezone.utc)
+
+            if agent_match.last_seen:
+                ls = agent_match.last_seen
+                if ls.tzinfo is None:
+                    ls = ls.replace(tzinfo=timezone.utc)
+                delta = now_utc - ls
+                total_secs = max(0, delta.total_seconds())
+                heartbeat_minutes = int(total_secs // 60)
+
+                if delta.days >= 1:
+                    heartbeat_age_str = f"{delta.days} day{'s' if delta.days != 1 else ''} ago"
+                elif delta.seconds >= 3600:
+                    hours = delta.seconds // 3600
+                    heartbeat_age_str = f"{hours} hour{'s' if hours != 1 else ''} ago"
+                else:
+                    mins = max(1, delta.seconds // 60)
+                    heartbeat_age_str = f"{mins} minute{'s' if mins != 1 else ''} ago"
+
+                if total_secs > stale_threshold_minutes * 60:
+                    is_stale = True
+            else:
+                is_stale = True
+
+            # Distinguish stored administrative status from actual recent connectivity
             if is_revoked:
+                actual_connectivity = "Revoked by Administrator"
                 edr_telemetry_status = "Revoked"
             elif is_disabled:
+                actual_connectivity = "Disabled by Administrator"
                 edr_telemetry_status = "Disabled"
             elif is_offline:
+                actual_connectivity = f"Offline (Last seen {heartbeat_age_str})"
                 edr_telemetry_status = "Offline"
-            elif is_online:
+            elif is_stale:
+                actual_connectivity = f"Stale (Last seen {heartbeat_age_str})"
+                edr_telemetry_status = "Inactive / Stale"
+            else:
+                actual_connectivity = "Online (Active Heartbeat)"
                 edr_telemetry_status = "Active"
 
             verification = {
                 "connectivity_status": agent_match.status,
+                "actual_connectivity": actual_connectivity,
                 "last_seen": agent_match.last_seen.isoformat() if agent_match.last_seen else None,
+                "last_seen_age": heartbeat_age_str,
+                "is_stale": is_stale,
+                "stale_threshold_minutes": stale_threshold_minutes,
                 "agent_disabled": is_disabled or is_revoked,
                 "is_revoked": is_revoked,
                 "is_disabled": is_disabled,
-                "is_online": is_online,
-                "is_offline": is_offline,
+                "is_online": is_online and not is_stale,
+                "is_offline": is_offline or is_stale,
                 "host_isolated": is_isolated,
                 "isolation_note": isolation_note,
                 "safeguards_status": {
                     "edr_telemetry_collection": edr_telemetry_status,
                     "network_isolation_quarantine": "Active" if is_isolated else "Inactive (Host is not isolated)",
+                },
+                "dedup_summary": {
+                    "telemetry_count": len(telemetry_events),
+                    "log_entries_count": len(log_events),
+                    "correlated_count": len(correlated_telemetry_ids),
+                    "unique_events_count": unique_events_count,
                 },
             }
 
