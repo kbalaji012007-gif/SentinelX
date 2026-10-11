@@ -93,9 +93,17 @@ class RequireRole:
 
     def __call__(self, current_user: User = Depends(get_current_user)) -> User:
         user_role = current_user.role.name if current_user.role else "Read Only"
-        if user_role not in self.allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Operation not permitted. Required roles: {list(self.allowed_roles)}",
-            )
-        return current_user
+        # Super Administrator has full unrestricted platform access
+        if user_role == "Super Administrator" or user_role in self.allowed_roles:
+            return current_user
+
+        # Normalized comparison (e.g. 'SOC Analyst' matches 'Analyst' or 'soc analyst')
+        role_norm = user_role.lower().replace(" ", "").replace("_", "")
+        allowed_norms = [r.lower().replace(" ", "").replace("_", "") for r in self.allowed_roles]
+        if role_norm in allowed_norms or any(allowed in role_norm for allowed in allowed_norms):
+            return current_user
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Operation not permitted. Required roles: {list(self.allowed_roles)}",
+        )

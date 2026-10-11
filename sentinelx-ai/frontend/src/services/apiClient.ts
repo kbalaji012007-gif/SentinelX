@@ -17,7 +17,9 @@ const apiClient = axios.create({
 // Request interceptor – attach JWT token
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("sentinelx_access_token");
+    const token =
+      localStorage.getItem("sentinelx_access_token") ||
+      sessionStorage.getItem("sentinelx_access_token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -32,7 +34,12 @@ apiClient.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("sentinelx_access_token");
-      window.location.href = "/login";
+      localStorage.removeItem("sentinelx_user");
+      sessionStorage.removeItem("sentinelx_access_token");
+      sessionStorage.removeItem("sentinelx_user");
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   }

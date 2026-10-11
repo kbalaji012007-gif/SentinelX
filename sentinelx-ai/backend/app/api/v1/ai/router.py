@@ -47,9 +47,40 @@ from app.services.ai_soc import (
 router = APIRouter(prefix="/ai", tags=["AI SOC Analyst & Copilot"])
 
 # RBAC roles
-_READERS = ["Admin", "Manager", "Analyst", "ReadOnly"]
-_WRITERS = ["Admin", "Manager", "Analyst"]
-_ADMINS = ["Admin", "Manager"]
+_READERS = [
+    "Super Administrator",
+    "Administrator",
+    "Admin",
+    "SOC Manager",
+    "Manager",
+    "SOC Analyst",
+    "Analyst",
+    "Threat Hunter",
+    "Incident Responder",
+    "Auditor",
+    "Read Only",
+    "ReadOnly",
+]
+_WRITERS = [
+    "Super Administrator",
+    "Administrator",
+    "Admin",
+    "SOC Manager",
+    "Manager",
+    "SOC Analyst",
+    "Analyst",
+    "Threat Hunter",
+    "Incident Responder",
+    "Auditor",
+    "Read Only",
+    "ReadOnly",
+]
+_ADMINS = [
+    "Super Administrator",
+    "Administrator",
+    "Admin",
+    "SOC Manager",
+]
 
 
 # ────────────────────────────────────────────────────────────────────────

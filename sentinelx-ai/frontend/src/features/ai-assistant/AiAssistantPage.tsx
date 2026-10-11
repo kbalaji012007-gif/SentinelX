@@ -95,11 +95,69 @@ export default function AiAssistantPage() {
   const chatMutation = useMutation({
     mutationFn: (msg: string) => sendCopilotChat(msg, activeConversationId || undefined),
     onSuccess: (newMsg: AIChatMessage) => {
-      if (!activeConversationId) {
+      if (!newMsg || !newMsg.content) {
+        const emptyMsg: AIChatMessage = {
+          id: `empty-${Date.now()}`,
+          conversation_id: activeConversationId || "",
+          sender: "Copilot",
+          content: "⚠️ **No Response Content Returned:** The SentinelX AI service did not return message content. Please try rephrasing your inquiry.",
+          evidence: {
+            insufficient_evidence_warning: "No response content returned by backend.",
+          },
+          confidence_score: 0,
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, emptyMsg]);
+        return;
+      }
+
+      if (!activeConversationId && newMsg.conversation_id) {
         setActiveConversationId(newMsg.conversation_id);
       }
-      setMessages((prev) => [...prev, newMsg]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === newMsg.id)) return prev;
+        return [...prev, newMsg];
+      });
       queryClient.invalidateQueries({ queryKey: ["ai-conversations"] });
+      if (newMsg.conversation_id) {
+        queryClient.invalidateQueries({ queryKey: ["ai-conversation", newMsg.conversation_id] });
+      }
+    },
+    onError: (err: any, failedQuery: string) => {
+      let errorDetail = "Unable to connect to the SentinelX backend. Please verify your connection or try again.";
+      if (err?.response?.status === 401) {
+        errorDetail = "Authentication failed. Your session may have expired. Please re-authenticate.";
+      } else if (err?.response?.status === 403) {
+        errorDetail = "Access denied. Your current role does not have authorization to query the AI assistant.";
+      } else if (err?.response?.status === 422) {
+        errorDetail = "Invalid request format sent to the SentinelX AI service.";
+      } else if (err?.response?.status === 500) {
+        errorDetail = "Database or internal server error occurred while analyzing security telemetry.";
+      } else if (err?.response?.status === 503) {
+        errorDetail = "SentinelX AI provider or backend service unavailable. Please retry shortly.";
+      } else if (err?.code === "ECONNABORTED" || err?.message?.toLowerCase().includes("timeout")) {
+        errorDetail = "Request timed out while analyzing telemetry records. Please try again.";
+      } else if (err?.response?.data?.detail) {
+        errorDetail = typeof err.response.data.detail === "string"
+          ? err.response.data.detail
+          : JSON.stringify(err.response.data.detail);
+      }
+
+      const errorMsg: AIChatMessage = {
+        id: `err-${Date.now()}`,
+        conversation_id: activeConversationId || "",
+        sender: "Copilot",
+        content: `⚠️ **Query Execution Failed**\n\n${errorDetail}`,
+        evidence: {
+          insufficient_evidence_warning: errorDetail,
+          is_error: true,
+          failed_query: failedQuery,
+        },
+        confidence_score: 0,
+        created_at: new Date().toISOString(),
+      };
+
+      setMessages((prev) => [...prev, errorMsg]);
     },
   });
 
@@ -611,8 +669,27 @@ export default function AiAssistantPage() {
                       </div>
                     )}
 
+                    {/* Error Notification and Retry Button */}
+                    {!isUser && ev.is_error && (
+                      <div className="pt-2 flex items-center justify-between border-t border-[var(--color-danger)]/30">
+                        <span className="text-[11px] text-[var(--color-danger)] flex items-center gap-1.5 font-medium">
+                          <ExclamationTriangleIcon className="w-4 h-4 shrink-0" />
+                          <span>Request failed to complete.</span>
+                        </span>
+                        {ev.failed_query && (
+                          <button
+                            onClick={() => handleSend(ev.failed_query)}
+                            disabled={chatMutation.isPending}
+                            className="px-3 py-1 rounded-lg bg-[var(--color-danger)]/20 hover:bg-[var(--color-danger)]/30 text-[var(--color-danger)] border border-[var(--color-danger)]/40 text-[11px] font-bold transition-all flex items-center gap-1.5"
+                          >
+                            <span>🔄 Retry Query</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {/* Bottom Utility Bar (Copy & Export) */}
-                    {!isUser && (
+                    {!isUser && !ev.is_error && (
                       <div className="flex items-center justify-end gap-2 pt-1 border-t border-[var(--color-border)]/60 text-[10px] text-[var(--color-text-muted)]">
                         <button
                           onClick={() => handleCopy(msg.id, msg.content)}

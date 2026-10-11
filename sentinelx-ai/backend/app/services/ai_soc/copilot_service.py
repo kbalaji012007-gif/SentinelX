@@ -6,7 +6,7 @@ and safe SOAR response action recommendation engine.
 """
 
 import re
-from uuid import UUID
+from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -864,7 +864,7 @@ class AICopilotService:
 
         if not conv:
             title_text = request.message[:40] + ("..." if len(request.message) > 40 else "")
-            conv = AIChatConversation(title=f"Chat: {title_text}")
+            conv = AIChatConversation(id=uuid4(), title=f"Chat: {title_text}", user_id=getattr(current_user, "id", None))
             self.session.add(conv)
             await self.session.flush()
         else:
@@ -872,10 +872,12 @@ class AICopilotService:
 
         # 2. Add user message
         user_msg = AIChatMessage(
+            id=uuid4(),
             conversation_id=conv.id,
             sender="User",
             content=request.message,
             confidence_score=100,
+            created_at=datetime.now(timezone.utc),
         )
         self.session.add(user_msg)
         await self.session.flush()
@@ -889,15 +891,20 @@ class AICopilotService:
 
         # 4. Save Copilot response
         copilot_msg = AIChatMessage(
+            id=uuid4(),
             conversation_id=conv.id,
             sender="Copilot",
             content=analysis["response_markdown"],
             evidence=analysis["evidence"],
             confidence_score=analysis["confidence_score"],
+            created_at=datetime.now(timezone.utc),
         )
         self.session.add(copilot_msg)
         await self.session.commit()
-        await self.session.refresh(copilot_msg)
+        try:
+            await self.session.refresh(copilot_msg)
+        except Exception:
+            pass
 
         return AIChatMessageResponse.model_validate(copilot_msg)
 

@@ -86,11 +86,11 @@ class SecurityAssistantTools:
             t_res = await self.session.execute(threat_query)
             for a in t_res.scalars().all():
                 fallback_alerts.append({
-                    "alert_id": a.alert_id,
-                    "title": a.title,
-                    "severity": a.severity,
-                    "status": a.status,
-                    "detected_at": a.created_at.isoformat() if a.created_at else None,
+                    "alert_id": getattr(a, "alert_id", str(a.id)),
+                    "title": getattr(a, "title", getattr(a, "alert_name", "Security Alert")),
+                    "severity": getattr(a, "severity", "UNKNOWN"),
+                    "status": getattr(a, "status", "Acknowledged" if getattr(a, "acknowledged", False) else "NEW"),
+                    "detected_at": a.created_at.isoformat() if hasattr(a, "created_at") and a.created_at else None,
                     "link": f"/threats",
                 })
 

@@ -22,6 +22,8 @@ from app.models.agent import EndpointAgent, AgentTelemetry
 from app.models.log import LogEntry
 from app.models.asset import Asset
 from app.models.incident import Incident
+from app.models.user import User
+from app.models.threat import Alert
 from app.models.ai_copilot import AIChatConversation, AIChatMessage
 from app.services.ai_soc.copilot_service import AICopilotService
 from app.services.ai_soc.tools import SecurityAssistantTools
@@ -617,4 +619,135 @@ async def test_regression_unverified_isolation_status():
     assert "Not Isolated (Unverified)" in res["response_markdown"]
     assert "Host is NOT verified as isolated" in res["response_markdown"]
     assert "Online" in res["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_rbac_super_admin_and_analyst_chat_access():
+    """Regression Test 7: Super Administrator, SOC Analyst, SOC Manager have full access to chat."""
+    from app.api.deps import RequireRole
+    from app.models.role import Role
+    from app.api.v1.ai.router import _WRITERS, _READERS
+
+    validator = RequireRole(_WRITERS)
+
+    # Super Admin
+    super_admin = User(email="kbalaji@sentinelx.ai")
+    super_admin.role = Role(name="Super Administrator")
+    assert validator(super_admin) == super_admin
+
+    # SOC Analyst
+    analyst = User(email="analyst@sentinelx.ai")
+    analyst.role = Role(name="SOC Analyst")
+    assert validator(analyst) == analyst
+
+    # SOC Manager
+    manager = User(email="manager@sentinelx.ai")
+    manager.role = Role(name="SOC Manager")
+    assert validator(manager) == manager
+
+    # Threat Hunter
+    hunter = User(email="hunter@sentinelx.ai")
+    hunter.role = Role(name="Threat Hunter")
+    assert validator(hunter) == hunter
+
+
+@pytest.mark.asyncio
+async def test_regression_chat_interaction_full_flow_persists_messages():
+    """Regression Test 8: Full chat_interaction persists user message and copilot reply with evidence."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    user = User(id=uuid4(), email="kbalaji@sentinelx.ai", first_name="K", last_name="Balaji")
+    user.role = MagicMock()
+    user.role.name = "Super Administrator"
+
+    conv_id = uuid4()
+    req = AIChatRequest(conversation_id=conv_id, message="Show me all critical security alerts.")
+
+    # Mock chat repo
+    mock_conv = AIChatConversation(id=conv_id, title="Test Chat", user_id=user.id)
+    service.chat_repo = MagicMock()
+    service.chat_repo.get_with_messages = AsyncMock(return_value=mock_conv)
+
+    # Mock tools
+    service.tools.get_security_alerts = AsyncMock(return_value={
+        "tool": "get_security_alerts",
+        "count": 1,
+        "filters_applied": {"severity": "CRITICAL"},
+        "data": [{
+            "alert_id": "ALT-CRIT-99",
+            "title": "Cobalt Strike Beaconing",
+            "severity": "CRITICAL",
+            "status": "NEW",
+            "mitre_technique": "T1071.001",
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+        }],
+    })
+
+    res = await service.chat_interaction(req, user_name="K Balaji", current_user=user)
+
+    assert res.sender == "Copilot"
+    assert "Cobalt Strike Beaconing" in res.content
+    assert res.evidence["observed_sentinelx_data"] is not None
+    assert res.confidence_score >= 90
+    assert mock_session.commit.called
+
+
+@pytest.mark.asyncio
+async def test_regression_critical_alerts_fallback_handles_model_fields():
+    """Regression Test 9: Fallback to Alert table works cleanly without AttributeError."""
+    mock_session = AsyncMock()
+    tools = SecurityAssistantTools(mock_session)
+
+    alert_obj = Alert(
+        id=uuid4(),
+        threat_id=uuid4(),
+        alert_name="Lateral Movement Detected",
+        severity="Critical",
+        acknowledged=False,
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "security_alerts" in s_str:
+            m.scalars.return_value.all.return_value = []
+        elif "alerts" in s_str:
+            m.scalars.return_value.all.return_value = [alert_obj]
+        else:
+            m.scalars.return_value.all.return_value = []
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await tools.get_security_alerts(severity="Critical")
+    assert res["count"] == 1
+    assert res["data"][0]["title"] == "Lateral Movement Detected"
+    assert res["data"][0]["severity"] == "Critical"
+
+
+@pytest.mark.asyncio
+async def test_regression_followup_messages_and_history_context():
+    """Regression Test 10: Multi-turn chat extracts entities from previous turns."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    msg1 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=uuid4(),
+        sender="User",
+        content="Investigate host WIN-LAPTOP-01",
+        confidence_score=100,
+    )
+    msg2 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=uuid4(),
+        sender="Copilot",
+        content="WIN-LAPTOP-01 telemetry analyzed.",
+        confidence_score=95,
+    )
+
+    ctx = service._extract_recent_entities([msg1, msg2])
+    assert ctx["last_host"] == "WIN-LAPTOP-01"
+
 
