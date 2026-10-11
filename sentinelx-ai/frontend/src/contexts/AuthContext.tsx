@@ -88,26 +88,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(access_token);
       setUser(loggedUser);
     } catch (err: any) {
-      if (email === "kbalaji@sentinelx.ai" && password === "Balaji@2007!AI") {
-        const adminProfile: UserProfile = {
-          id: "90000000-0000-0000-0000-000000000001",
-          email: "kbalaji@sentinelx.ai",
-          first_name: "K",
-          last_name: "Balaji",
-          role_id: "9a07e76a-c6dc-4632-a802-9ccb2c7d8353",
-          role: { id: "9a07e76a-c6dc-4632-a802-9ccb2c7d8353", name: "Super Administrator" },
-          is_active: true,
-          mfa_enabled: false,
-        };
-        const mockToken = "super_admin_jwt_access_token_sentinelx";
-        const storage = rememberMe ? localStorage : sessionStorage;
-        storage.setItem("sentinelx_access_token", mockToken);
-        storage.setItem("sentinelx_user", JSON.stringify(adminProfile));
-        setToken(mockToken);
-        setUser(adminProfile);
-      } else {
-        throw new Error(err.response?.data?.detail || "Authentication failed. Check credentials.");
-      }
+      const errorMessage =
+        err.response?.data?.detail ||
+        err.message ||
+        "Authentication failed. Check credentials.";
+      throw new Error(errorMessage);
     } finally {
       setIsLoading(false);
     }

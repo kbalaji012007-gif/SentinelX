@@ -28,15 +28,18 @@ class AIChatRepository(BaseRepository[AIChatConversation]):
         )
         return result.scalar_one_or_none()
 
-    async def list_user_conversations(self, skip: int = 0, limit: int = 25) -> Sequence[AIChatConversation]:
-        """Fetch list of active conversation sessions."""
-        result = await self.session.execute(
+    async def list_user_conversations(
+        self, user_id: UUID | None = None, skip: int = 0, limit: int = 25
+    ) -> Sequence[AIChatConversation]:
+        """Fetch list of active conversation sessions scoped to user_id if provided."""
+        stmt = (
             select(AIChatConversation)
             .options(selectinload(AIChatConversation.messages))
-            .order_by(AIChatConversation.updated_at.desc())
-            .offset(skip)
-            .limit(limit)
         )
+        if user_id is not None:
+            stmt = stmt.where(AIChatConversation.user_id == user_id)
+        stmt = stmt.order_by(AIChatConversation.updated_at.desc()).offset(skip).limit(limit)
+        result = await self.session.execute(stmt)
         return result.scalars().all()
 
     async def delete_conversation(self, conversation_id: UUID) -> bool:

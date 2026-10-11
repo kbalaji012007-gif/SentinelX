@@ -179,7 +179,8 @@ async def test_disabled_agent_rejection():
 
     service.agent_repo.get_by_agent_id = AsyncMock(return_value=mock_agent)
 
+    valid_token = service.generate_agent_token(agent_id)
     with pytest.raises(Exception) as exc_info:
-        await service.authenticate_agent(agent_id)
+        await service.authenticate_agent(valid_token)
 
     assert "disabled" in str(exc_info.value).lower()

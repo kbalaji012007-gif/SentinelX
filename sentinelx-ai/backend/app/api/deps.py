@@ -56,40 +56,7 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Extract and validate JWT token to get current authenticated user."""
-    if token == "super_admin_jwt_access_token_sentinelx":
-        user_repo = UserRepository(db)
-        user = await user_repo.get_by_email("kbalaji@sentinelx.ai")
-        if not user:
-            from app.models.role import Role
-            from app.core.security import get_password_hash
-            from uuid import uuid4
-            from sqlalchemy import select
-            role_stmt = select(Role).where(Role.name == "Super Administrator")
-            role_res = await db.execute(role_stmt)
-            super_role = role_res.scalars().first()
-            if not super_role:
-                super_role = Role(id=uuid4(), name="Super Administrator", description="Super Admin Role", permissions={"all": True})
-                db.add(super_role)
-                await db.flush()
-            user = User(
-                id=UUID("90000000-0000-0000-0000-000000000001"),
-                email="kbalaji@sentinelx.ai",
-                password_hash=get_password_hash("Balaji@2007!AI"),
-                first_name="K",
-                last_name="Balaji",
-                role_id=super_role.id,
-                is_active=True,
-            )
-            user.role = super_role
-            db.add(user)
-            try:
-                await db.commit()
-                await db.refresh(user)
-            except Exception:
-                await db.rollback()
-        return user
-
+    """Extract and validate cryptographic JWT token to get current authenticated user."""
     payload = decode_token(token)
     user_id_str: str | None = payload.get("sub")
 
@@ -121,25 +88,87 @@ async def get_current_user(
     return user
 
 
+# ── Canonical Platform Roles & Aliases ─────────────────────────────────────────
+CANONICAL_PLATFORM_ROLES = {
+    "Super Administrator",
+    "Administrator",
+    "SOC Manager",
+    "SOC Analyst",
+    "Threat Hunter",
+    "Incident Responder",
+    "Auditor",
+    "Read Only",
+}
+
+ROLE_ALIASES: dict[str, str] = {
+    "superadministrator": "Super Administrator",
+    "superadmin": "Super Administrator",
+    "administrator": "Administrator",
+    "admin": "Administrator",
+    "socmanager": "SOC Manager",
+    "manager": "SOC Manager",
+    "socanalyst": "SOC Analyst",
+    "analyst": "SOC Analyst",
+    "threathunter": "Threat Hunter",
+    "incidentresponder": "Incident Responder",
+    "auditor": "Auditor",
+    "readonly": "Read Only",
+    "read-only": "Read Only",
+}
+
+
+def canonicalize_role(role_name: str | None) -> str:
+    """Normalize a role name or alias to its canonical platform role."""
+    if not role_name:
+        return "Read Only"
+    cleaned = role_name.lower().replace(" ", "").replace("_", "").replace("-", "")
+    return ROLE_ALIASES.get(cleaned, role_name.strip())
+
+
+# Standardized Role Collections for Route Guards
+ALL_PLATFORM_ROLES = list(CANONICAL_PLATFORM_ROLES)
+ALL_READERS = ALL_PLATFORM_ROLES
+SOC_OPERATIONAL_ROLES = [
+    "Super Administrator",
+    "Administrator",
+    "SOC Manager",
+    "SOC Analyst",
+    "Threat Hunter",
+    "Incident Responder",
+]
+SOAR_ACTION_ROLES = [
+    "Super Administrator",
+    "Administrator",
+    "SOC Manager",
+    "SOC Analyst",
+    "Incident Responder",
+]
+ADMINISTRATIVE_ROLES = [
+    "Super Administrator",
+    "Administrator",
+    "SOC Manager",
+]
+SUPER_ADMIN_ROLES = [
+    "Super Administrator",
+]
+
+
 class RequireRole:
-    """Role-Based Access Control (RBAC) dependency validator."""
+    """Role-Based Access Control (RBAC) dependency validator using canonical role mapping."""
 
     def __init__(self, allowed_roles: Sequence[str]) -> None:
-        self.allowed_roles = allowed_roles
+        self.allowed_roles = list(allowed_roles)
+        self.allowed_canonical = {canonicalize_role(r) for r in self.allowed_roles}
 
     def __call__(self, current_user: User = Depends(get_current_user)) -> User:
-        user_role = current_user.role.name if current_user.role else "Read Only"
-        # Super Administrator has full unrestricted platform access
-        if user_role == "Super Administrator" or user_role in self.allowed_roles:
-            return current_user
+        raw_role = current_user.role.name if current_user.role else "Read Only"
+        user_canonical = canonicalize_role(raw_role)
 
-        # Normalized comparison (e.g. 'SOC Analyst' matches 'Analyst' or 'soc analyst')
-        role_norm = user_role.lower().replace(" ", "").replace("_", "")
-        allowed_norms = [r.lower().replace(" ", "").replace("_", "") for r in self.allowed_roles]
-        if role_norm in allowed_norms or any(allowed in role_norm for allowed in allowed_norms):
+        # Super Administrator has full platform access
+        if user_canonical == "Super Administrator" or user_canonical in self.allowed_canonical:
             return current_user
 
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Operation not permitted. Required roles: {list(self.allowed_roles)}",
+            detail=f"Operation not permitted. Required roles: {sorted(self.allowed_canonical)}",
         )

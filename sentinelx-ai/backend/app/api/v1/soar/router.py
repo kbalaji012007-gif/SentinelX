@@ -8,7 +8,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, RequireRole
+from app.api.deps import (
+    get_db,
+    RequireRole,
+    ALL_READERS,
+    SOAR_ACTION_ROLES,
+    ADMINISTRATIVE_ROLES,
+)
 from app.models.user import User
 from app.schemas.soar_schema import (
     PlaybookCreate,
@@ -39,10 +45,10 @@ from app.services.soar_service import SOARService
 
 router = APIRouter(prefix="/soar", tags=["SOAR Automation"])
 
-# RBAC roles
-_READERS = ["Admin", "Manager", "Analyst", "ReadOnly"]
-_WRITERS = ["Admin", "Manager", "Analyst"]
-_ADMINS = ["Admin", "Manager"]
+# Standardized RBAC roles
+_READERS = ALL_READERS
+_WRITERS = SOAR_ACTION_ROLES
+_ADMINS = ADMINISTRATIVE_ROLES
 
 
 # ────────────────────────────────────────────────────────────────────────

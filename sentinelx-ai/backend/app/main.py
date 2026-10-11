@@ -6,8 +6,11 @@ FastAPI Application Entry Point
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI
+from uuid import uuid4
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 
@@ -67,15 +70,47 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS Middleware
+# CORS Middleware: Strict origin matching, avoiding broad wildcards
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+# Global Safe Exception Handlers: Prevent leaking database schemas, queries, or stack traces
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError) -> JSONResponse:
+    ref_id = str(uuid4())[:8]
+    logger.error("database_exception_occurred", reference_id=ref_id, path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "A database error occurred. The internal error has been logged.",
+            "reference_id": ref_id,
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers=exc.headers,
+        )
+    ref_id = str(uuid4())[:8]
+    logger.error("unhandled_server_exception", reference_id=ref_id, path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "An internal server error occurred.",
+            "reference_id": ref_id,
+        },
+    )
 
 from app.api.v1.auth.router import router as auth_router
 from app.api.v1.dashboard.router import router as dashboard_router

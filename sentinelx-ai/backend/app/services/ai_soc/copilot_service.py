@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from fastapi import HTTPException, status
 
 from app.models.ai_copilot import AIChatConversation, AIChatMessage
 from app.repositories.ai_copilot_repo import AIChatRepository
@@ -22,6 +23,34 @@ from app.schemas.ai_copilot_schema import (
 )
 from app.services.threat_intelligence.providers.gemini import GeminiThreatProvider
 from app.services.ai_soc.tools import SecurityAssistantTools
+
+
+def sanitize_untrusted_text(text: Any, max_length: int = 500) -> str:
+    """
+    Sanitize untrusted text (log messages, command lines, threat intel, user input)
+    against prompt injection, markdown table breakage, and HTML tag injection.
+    Treats retrieved content strictly as passive data.
+    """
+    if text is None:
+        return ""
+    s = str(text)
+    if len(s) > max_length:
+        s = s[:max_length] + "… (truncated)"
+    # Escape HTML to prevent injection into markdown previewers
+    s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # Neutralize Markdown table column separators
+    s = s.replace("|", "&#124;")
+    # Neutralize common prompt injection patterns
+    injection_patterns = [
+        r"(?i)\bignore\s+(?:all\s+)?previous\s+instructions\b",
+        r"(?i)\[system(?:\s*instructions?)?\]",
+        r"(?i)\bsystem\s*:\s*",
+        r"(?i)\bassistant\s*:\s*",
+        r"(?i)\byou\s+are\s+now\s+in\s+developer\s+mode\b",
+    ]
+    for pattern in injection_patterns:
+        s = re.sub(pattern, "[UNTRUSTED_CONTENT_FILTERED]", s)
+    return s.strip()
 
 
 class AICopilotService:
@@ -689,8 +718,8 @@ class AICopilotService:
                 rec_id = t.get("record_id") or str(t.get("id", "N/A"))[:8]
                 sev = t.get("severity", "INFO")
                 src = t.get("source", f"AgentTelemetry ({host})")
-                etype = t.get("event_type", "Telemetry")
-                details = t.get("details", "Standard event")
+                etype = sanitize_untrusted_text(t.get("event_type", "Telemetry"))
+                details = sanitize_untrusted_text(t.get("details", "Standard event"))
                 md += f"| `{ts}` | `{win_eid}` | `{rec_id}` | `{sev}` | `{src}` | `{etype}` | {details} |\n"
             md += "\n"
         else:
@@ -709,8 +738,8 @@ class AICopilotService:
                 rec_id = l.get("record_id") or str(l.get("id", "N/A"))[:8]
                 sev = l.get("severity", "INFO")
                 src = l.get("source", "sentinelx.log_entries")
-                etype = l.get("event_type", "Log")
-                details = l.get("details", "Log event")
+                etype = sanitize_untrusted_text(l.get("event_type", "Log"))
+                details = sanitize_untrusted_text(l.get("details", "Log event"))
                 corr_tel = l.get("correlated_telemetry_record_id")
                 corr_label = f"🔗 Telemetry `{corr_tel}`" if corr_tel else "Direct Log Source"
                 md += f"| `{ts}` | `{win_eid}` | `{rec_id}` | `{sev}` | `{src}` | `{etype}` | {corr_label} | {details} |\n"
@@ -997,7 +1026,10 @@ class AICopilotService:
         md = f"### 🔎 Security Records Query: \"{query}\"\n\n"
         md += f"Retrieved **{len(logs)}** matching security log event(s):\n\n"
         for l in logs:
-            md += f"- **[{l['log_level']}]** `{l['event_type']}`: {l['message']} *(Host/IP: {l['source_ip'] or 'Local'})*\n"
+            safe_msg = sanitize_untrusted_text(l.get("message", ""))
+            safe_type = sanitize_untrusted_text(l.get("event_type", ""))
+            safe_host = sanitize_untrusted_text(l.get("source_ip") or "Local")
+            md += f"- **[{l.get('log_level')}]** `{safe_type}`: {safe_msg} *(Host/IP: {safe_host})*\n"
         return md
 
     # ────────────────────────────────────────────────────────────────────────
@@ -1016,6 +1048,14 @@ class AICopilotService:
 
         if request.conversation_id:
             conv = await self.chat_repo.get_with_messages(request.conversation_id)
+            if conv and current_user:
+                current_uid = getattr(current_user, "id", None)
+                user_role = getattr(getattr(current_user, "role", None), "name", "Read Only")
+                if conv.user_id and current_uid and conv.user_id != current_uid and user_role != "Super Administrator":
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access denied: You do not have permission to post messages to this conversation.",
+                    )
 
         if not conv:
             title_text = request.message[:40] + ("..." if len(request.message) > 40 else "")

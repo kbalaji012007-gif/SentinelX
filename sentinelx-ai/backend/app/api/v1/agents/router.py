@@ -80,11 +80,11 @@ async def agent_heartbeat(
     if agent_id_path:
         payload.agent_id = agent_id_path
 
-    # Authenticate via header if token provided
-    if authorization:
-        await service.authenticate_agent(authorization)
-
-    return await service.process_heartbeat(payload)
+    agent = await service.authenticate_agent(
+        token_or_header=authorization,
+        expected_agent_id=payload.agent_id,
+    )
+    return await service.process_heartbeat(payload, agent=agent)
 
 
 @router.post(
@@ -103,10 +103,11 @@ async def ingest_telemetry(
     Normalizes security events into sentinelx.log_entries and triggers threat detection.
     """
     service = AgentService(db)
-    if authorization:
-        await service.authenticate_agent(authorization)
-
-    return await service.ingest_telemetry(payload)
+    agent = await service.authenticate_agent(
+        token_or_header=authorization,
+        expected_agent_id=payload.agent_id,
+    )
+    return await service.ingest_telemetry(payload, agent=agent)
 
 
 # ── Administrative & Frontend Operations ───────────────────────────────────

@@ -77,34 +77,58 @@ class AgentService:
         }
         return jwt.encode(payload, AGENT_TOKEN_SECRET, algorithm=AGENT_TOKEN_ALGORITHM)
 
-    async def authenticate_agent(self, token_or_agent_id: str) -> EndpointAgent:
+    async def authenticate_agent(
+        self,
+        token_or_header: Optional[str] = None,
+        expected_agent_id: Optional[str] = None,
+    ) -> EndpointAgent:
         """
-        Authenticate an agent by token or agent_id string.
-        Validates that the agent exists and is not Disabled or Revoked.
+        Authenticate an agent via signed cryptographic agent token.
+        Verifies signature, matches agent_id to payload, and ensures agent is not Disabled or Revoked.
         """
-        agent_id_str = token_or_agent_id
+        raw_token = token_or_header or ""
+        if raw_token.startswith("Bearer "):
+            raw_token = raw_token[7:].strip()
 
-        # If Bearer token passed, decode it
-        if token_or_agent_id.startswith("Bearer "):
-            token_or_agent_id = token_or_agent_id[7:].strip()
+        if not raw_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing agent authorization token. Enrolled agents must provide a valid Bearer token.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         try:
             payload = jwt.decode(
-                token_or_agent_id,
+                raw_token,
                 AGENT_TOKEN_SECRET,
                 algorithms=[AGENT_TOKEN_ALGORITHM],
-                options={"verify_exp": False},  # Allow long-running local agents
+                options={"verify_exp": True},
             )
-            agent_id_str = payload.get("sub", agent_id_str)
-        except Exception:
-            # Fallback to direct agent_id lookup
-            pass
+            token_agent_id = payload.get("sub")
+            if not token_agent_id:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid agent token: missing subject identity.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+        except jwt.PyJWTError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Cryptographic agent verification failed: {str(exc)}",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-        agent = await self.agent_repo.get_by_agent_id(agent_id_str)
+        if expected_agent_id and token_agent_id != expected_agent_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Agent identity mismatch: token subject '{token_agent_id}' does not match request agent '{expected_agent_id}'.",
+            )
+
+        agent = await self.agent_repo.get_by_agent_id(token_agent_id)
         if not agent:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Agent identity '{agent_id_str}' not recognized.",
+                detail=f"Agent identity '{token_agent_id}' not found in registry.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
@@ -146,6 +170,11 @@ class AgentService:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Cannot enroll a revoked agent. Please generate a new agent identity.",
+                )
+            if existing.status == "Disabled":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Cannot enroll a disabled agent. Endpoint agent must be reactivated by an administrator.",
                 )
 
             update_data = {
@@ -210,9 +239,27 @@ class AgentService:
 
     # ── Heartbeat ─────────────────────────────────────────────────────────────
 
-    async def process_heartbeat(self, payload: AgentHeartbeatRequest) -> AgentHeartbeatResponse:
+    async def process_heartbeat(
+        self, payload: AgentHeartbeatRequest, agent: Optional[EndpointAgent] = None
+    ) -> AgentHeartbeatResponse:
         """Process periodic agent heartbeat and update status."""
-        agent = await self.authenticate_agent(payload.agent_id)
+        if not agent:
+            agent = await self.agent_repo.get_by_agent_id(payload.agent_id)
+            if not agent:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Agent '{payload.agent_id}' not found.",
+                )
+            if agent.status == "Disabled":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Endpoint agent is currently disabled by administrator.",
+                )
+            if agent.status == "Revoked":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Endpoint agent authorization has been revoked.",
+                )
 
         now = datetime.now(timezone.utc)
         meta_update = {
@@ -246,13 +293,31 @@ class AgentService:
 
     # ── Telemetry Ingestion & Security Rules ─────────────────────────────────
 
-    async def ingest_telemetry(self, batch: AgentTelemetryBatchCreate) -> Dict[str, Any]:
+    async def ingest_telemetry(
+        self, batch: AgentTelemetryBatchCreate, agent: Optional[EndpointAgent] = None
+    ) -> Dict[str, Any]:
         """
         Ingest telemetry batch from an authenticated endpoint agent.
         Normalizes security events, persists to sentinelx.agent_telemetry,
         forwards into sentinelx.log_entries, and triggers Threat Detection rules.
         """
-        agent = await self.authenticate_agent(batch.agent_id)
+        if not agent:
+            agent = await self.agent_repo.get_by_agent_id(batch.agent_id)
+            if not agent:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Agent '{batch.agent_id}' not found.",
+                )
+            if agent.status == "Disabled":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Endpoint agent is currently disabled by administrator.",
+                )
+            if agent.status == "Revoked":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Endpoint agent authorization has been revoked.",
+                )
 
         # Get or resolve associated LogSource ID
         source_name = f"Endpoint Agent: {agent.hostname}"

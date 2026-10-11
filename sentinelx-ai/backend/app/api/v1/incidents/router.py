@@ -9,7 +9,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, RequireRole
+from app.api.deps import (
+    get_db,
+    RequireRole,
+    ALL_READERS,
+    SOC_OPERATIONAL_ROLES,
+    ADMINISTRATIVE_ROLES,
+)
 from app.models.user import User
 from app.schemas.incident_schema import (
     IncidentCreate,
@@ -29,10 +35,10 @@ from app.services.incident_service import IncidentService
 
 router = APIRouter(prefix="/incidents", tags=["Incidents"])
 
-# RBAC permissions
-_READERS = ["Admin", "Manager", "Analyst", "ReadOnly"]
-_WRITERS = ["Admin", "Manager", "Analyst"]
-_ADMINS = ["Admin", "Manager"]
+# Standardized RBAC permissions
+_READERS = ALL_READERS
+_WRITERS = SOC_OPERATIONAL_ROLES
+_ADMINS = ADMINISTRATIVE_ROLES
 
 
 @router.get(

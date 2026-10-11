@@ -10,7 +10,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, RequireRole
+from app.api.deps import (
+    get_db,
+    RequireRole,
+    ALL_READERS,
+    SOC_OPERATIONAL_ROLES,
+    SOAR_ACTION_ROLES,
+    ADMINISTRATIVE_ROLES,
+)
 from app.models.user import User
 from app.models.ai_copilot import AIChatConversation
 from app.schemas.ai_soc_schema import (
@@ -46,41 +53,11 @@ from app.services.ai_soc import (
 
 router = APIRouter(prefix="/ai", tags=["AI SOC Analyst & Copilot"])
 
-# RBAC roles
-_READERS = [
-    "Super Administrator",
-    "Administrator",
-    "Admin",
-    "SOC Manager",
-    "Manager",
-    "SOC Analyst",
-    "Analyst",
-    "Threat Hunter",
-    "Incident Responder",
-    "Auditor",
-    "Read Only",
-    "ReadOnly",
-]
-_WRITERS = [
-    "Super Administrator",
-    "Administrator",
-    "Admin",
-    "SOC Manager",
-    "Manager",
-    "SOC Analyst",
-    "Analyst",
-    "Threat Hunter",
-    "Incident Responder",
-    "Auditor",
-    "Read Only",
-    "ReadOnly",
-]
-_ADMINS = [
-    "Super Administrator",
-    "Administrator",
-    "Admin",
-    "SOC Manager",
-]
+# Standardized RBAC Role Groups for AI Module
+_READERS = ALL_READERS
+_WRITERS = SOC_OPERATIONAL_ROLES
+_SOAR_EXECUTORS = SOAR_ACTION_ROLES
+_ADMINS = ADMINISTRATIVE_ROLES
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -116,10 +93,13 @@ async def list_conversations(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(RequireRole(_READERS)),
 ) -> ConversationListResponse:
-    """Fetch paginated list of chat conversation sessions."""
+    """Fetch paginated list of chat conversation sessions scoped to authenticated user."""
     service = AICopilotService(db)
     skip = (page - 1) * page_size
-    convs = await service.chat_repo.list_user_conversations(skip=skip, limit=page_size)
+    user_role = current_user.role.name if current_user.role else "Read Only"
+    # Super Administrator can view all conversations for administrative oversight
+    user_filter = None if user_role == "Super Administrator" else current_user.id
+    convs = await service.chat_repo.list_user_conversations(user_id=user_filter, skip=skip, limit=page_size)
     items = [AIChatConversationResponse.model_validate(c) for c in convs]
     return ConversationListResponse(total=len(items), items=items)
 
@@ -135,13 +115,19 @@ async def get_conversation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(RequireRole(_READERS)),
 ) -> AIChatConversationResponse:
-    """Fetch single conversation session with full ordered message history."""
+    """Fetch single conversation session with privacy ownership verification."""
     service = AICopilotService(db)
     conv = await service.chat_repo.get_with_messages(id)
     if not conv:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation session '{id}' not found.",
+        )
+    user_role = current_user.role.name if current_user.role else "Read Only"
+    if conv.user_id and conv.user_id != current_user.id and user_role != "Super Administrator":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You do not have permission to view this conversation.",
         )
     return AIChatConversationResponse.model_validate(conv)
 
@@ -157,7 +143,7 @@ async def create_conversation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(RequireRole(_WRITERS)),
 ) -> AIChatConversationResponse:
-    """Explicitly create a new conversation session."""
+    """Explicitly create a new conversation session owned by authenticated user."""
     conv = AIChatConversation(title=payload.title, user_id=current_user.id)
     db.add(conv)
     await db.commit()
@@ -175,14 +161,22 @@ async def delete_conversation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(RequireRole(_WRITERS)),
 ) -> dict[str, str]:
-    """Delete conversation session and all associated chat messages."""
+    """Delete conversation session with privacy ownership verification."""
     service = AICopilotService(db)
-    deleted = await service.chat_repo.delete_conversation(id)
-    if not deleted:
+    conv = await service.chat_repo.get_by_id(id)
+    if not conv:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation session '{id}' not found.",
         )
+    user_role = current_user.role.name if current_user.role else "Read Only"
+    if conv.user_id and conv.user_id != current_user.id and user_role != "Super Administrator":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You do not have permission to delete this conversation.",
+        )
+    await service.chat_repo.delete(conv)
+    await db.commit()
     return {"message": f"Conversation '{id}' deleted successfully."}
 
 
@@ -199,7 +193,7 @@ async def delete_conversation(
 async def execute_safe_action(
     payload: SafeActionExecuteRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(RequireRole(_WRITERS)),
+    current_user: User = Depends(RequireRole(_SOAR_EXECUTORS)),
 ) -> SafeActionExecuteResponse:
     """
     Execute or dry-run a recommended response action through SentinelX SOAR action registry.
