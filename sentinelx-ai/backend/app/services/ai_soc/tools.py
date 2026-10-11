@@ -183,13 +183,17 @@ class SecurityAssistantTools:
     ) -> Tuple[Optional[EndpointAgent], Optional[str], List[Dict[str, Any]]]:
         """
         Verify and resolve the target endpoint agent using database records.
-        Strictly prevents arbitrary host guessing.
+        Strictly prevents arbitrary host guessing and enforces deterministic UUID selection.
         Returns: (agent, error_message, candidate_hosts)
         """
         generic_terms = {"laptop", "workstation", "desktop", "endpoint", "host", "agent", "pc", "server", "machine", "device"}
 
-        # 1. Extract candidate hostname / agent ID from query_text if not explicitly provided
+        # 1. Extract explicit candidate agent UUID or ID from query_text or hostname if provided
         if query_text:
+            uuid_m = re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", query_text)
+            if uuid_m and not agent_id:
+                agent_id = uuid_m.group(1)
+
             agt_m = re.search(r"\b(AGT-[A-Za-z0-9_-]+)\b", query_text, re.IGNORECASE)
             if agt_m and not agent_id:
                 agent_id = agt_m.group(1)
@@ -198,45 +202,113 @@ class SecurityAssistantTools:
             if host_m and not hostname:
                 hostname = host_m.group(1)
 
+        # If hostname itself was passed as a UUID, treat it as agent_id
+        if hostname and re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", hostname):
+            if not agent_id:
+                agent_id = hostname.strip()
+            hostname = None
+
         # Normalize generic words
         if hostname and hostname.strip().lower() in generic_terms:
             hostname = None
         if agent_id and agent_id.strip().lower() in generic_terms:
             agent_id = None
 
-        # 2. If a specific hostname or agent_id is provided, search for exact/specific match
-        if hostname or agent_id:
-            conditions = []
-            if agent_id:
-                conditions.append(EndpointAgent.agent_id.ilike(agent_id.strip()))
-            if hostname:
-                conditions.append(EndpointAgent.hostname.ilike(hostname.strip()))
-                conditions.append(EndpointAgent.hostname.ilike(f"%{hostname.strip()}%"))
+        # Helper to check RBAC and agent access authorization
+        def check_user_authorized(target_agent: EndpointAgent) -> bool:
+            if not user:
+                return True
+            if getattr(user, "is_active", True) is False:
+                return False
+            user_role = (user.role.name if getattr(user, "role", None) else "").strip()
+            # Super Administrator has universal access
+            if "super administrator" in user_role.lower():
+                return True
+            allowed_roles = [
+                "super administrator", "administrator", "soc manager", "soc analyst",
+                "threat hunter", "incident responder", "auditor", "read only",
+                "admin", "manager", "analyst",
+            ]
+            if user_role and not any(user_role.lower() == r for r in allowed_roles):
+                return False
+            # Check restricted agent metadata
+            meta = target_agent.agent_metadata or {}
+            restricted_users = meta.get("allowed_users") or meta.get("restricted_users")
+            if restricted_users and isinstance(restricted_users, list):
+                user_email = (user.email or "").lower()
+                if user_email not in [str(u).lower() for u in restricted_users]:
+                    return False
+            return True
 
-            ag_stmt = select(EndpointAgent).where(or_(*conditions)).limit(5)
-            matches = (await self.session.execute(ag_stmt)).scalars().all()
+        # 2. DETERMINISTIC AGENT ID RESOLUTION (Highest Priority)
+        # When an explicit agent ID or UUID is available: DO NOT use hostname matching.
+        if agent_id:
+            agent_id_clean = agent_id.strip()
+            is_uuid = False
+            parsed_uuid = None
+            try:
+                parsed_uuid = UUID(agent_id_clean)
+                is_uuid = True
+            except (ValueError, TypeError):
+                pass
+
+            if is_uuid:
+                stmt = select(EndpointAgent).where(
+                    or_(
+                        EndpointAgent.id == parsed_uuid,
+                        EndpointAgent.agent_id.ilike(agent_id_clean),
+                    )
+                )
+            else:
+                stmt = select(EndpointAgent).where(EndpointAgent.agent_id.ilike(agent_id_clean))
+
+            agent_match = (await self.session.execute(stmt)).scalars().first()
+
+            if not agent_match:
+                return None, f"Endpoint '{agent_id_clean}' not found in enrolled endpoint agents. Verified against database: 0 matching records.", []
+
+            if not check_user_authorized(agent_match):
+                return None, "Access denied. You are not authorized to access this endpoint.", []
+
+            return agent_match, None, []
+
+        # 3. Hostname Matching (ONLY when NO explicit agent_id was provided)
+        if hostname:
+            hostname_clean = hostname.strip()
+            stmt_exact = select(EndpointAgent).where(EndpointAgent.hostname.ilike(hostname_clean))
+            matches = (await self.session.execute(stmt_exact)).scalars().all()
+
+            if not matches:
+                stmt_sub = select(EndpointAgent).where(EndpointAgent.hostname.ilike(f"%{hostname_clean}%"))
+                matches = (await self.session.execute(stmt_sub)).scalars().all()
 
             if len(matches) == 1:
-                return matches[0], None, []
+                matched_agent = matches[0]
+                if not check_user_authorized(matched_agent):
+                    return None, "Access denied. You are not authorized to access this endpoint.", []
+                return matched_agent, None, []
             elif len(matches) > 1:
-                for m in matches:
-                    if hostname and m.hostname.lower() == hostname.strip().lower():
-                        return m, None, []
-                    if agent_id and m.agent_id.lower() == agent_id.strip().lower():
-                        return m, None, []
-                candidates = [{"hostname": m.hostname, "agent_id": m.agent_id, "platform": m.platform, "status": m.status} for m in matches]
-                return None, f"Ambiguous endpoint identifier '{hostname or agent_id}'. Multiple agents matched in database.", candidates
+                candidates = [
+                    {
+                        "hostname": m.hostname,
+                        "agent_id": m.agent_id,
+                        "platform": m.platform,
+                        "status": m.status,
+                    }
+                    for m in matches
+                ]
+                return None, f"Multiple enrolled endpoints match hostname '{hostname_clean}'. Endpoint Resolution Required.", candidates
             else:
-                return None, f"Endpoint '{hostname or agent_id}' was not found in enrolled endpoint agents. Verified against database: 0 matching records.", []
+                return None, f"Endpoint '{hostname_clean}' was not found in enrolled endpoint agents. Verified against database: 0 matching records.", []
 
-        # 3. No explicit hostname provided: Resolve via authenticated user's assigned agent or platform
+        # 4. No explicit hostname or agent_id: Resolve via authenticated user's assigned agent or platform
         all_agents_stmt = select(EndpointAgent).order_by(EndpointAgent.hostname)
         all_agents = (await self.session.execute(all_agents_stmt)).scalars().all()
 
         if not all_agents:
             return None, "No endpoint agents are currently enrolled in sentinelx.endpoint_agents.", []
 
-        # Check if an agent is associated with the authenticated user
+        # Check user association
         if user:
             user_email = (user.email or "").lower()
             user_uname = user_email.split("@")[0] if "@" in user_email else ""
@@ -250,31 +322,31 @@ class SecurityAssistantTools:
                 if (user_email and (user_email == m_user or user_email == m_owner)) or \
                    (user_uname and user_uname == m_user) or \
                    (user_first and user_first in m_owner):
-                    user_matches.append(a)
+                    if check_user_authorized(a):
+                        user_matches.append(a)
 
             if len(user_matches) == 1:
                 return user_matches[0], None, []
             elif len(user_matches) > 1:
                 candidates = [{"hostname": m.hostname, "agent_id": m.agent_id, "platform": m.platform, "status": m.status} for m in user_matches]
-                return None, f"Multiple endpoints are associated with user '{user.email}'. Please specify which hostname or agent ID to inspect.", candidates
+                return None, f"Multiple endpoints are associated with user '{user.email}'. Please specify which agent ID to inspect.", candidates
 
-        # Check platform filter (e.g. "Windows")
+        # Check platform filter
         if platform:
-            platform_matches = [a for a in all_agents if platform.lower() in (a.platform or "").lower()]
+            platform_matches = [a for a in all_agents if platform.lower() in (a.platform or "").lower() and check_user_authorized(a)]
             if len(platform_matches) == 1:
                 return platform_matches[0], None, []
             elif len(platform_matches) > 1:
                 candidates = [{"hostname": m.hostname, "agent_id": m.agent_id, "platform": m.platform, "status": m.status} for m in platform_matches]
-                return None, f"Multiple {platform} endpoints are enrolled. Please specify the target hostname or agent ID to query.", candidates
+                return None, f"Multiple {platform} endpoints are enrolled. Please specify the target agent ID to query.", candidates
             else:
                 return None, f"No enrolled {platform} endpoints were found in sentinelx.endpoint_agents.", []
 
-        # If only 1 enrolled agent exists across the entire organization, return it
-        if len(all_agents) == 1:
+        if len(all_agents) == 1 and check_user_authorized(all_agents[0]):
             return all_agents[0], None, []
 
-        candidates = [{"hostname": m.hostname, "agent_id": m.agent_id, "platform": m.platform, "status": m.status} for m in all_agents]
-        return None, "Multiple enrolled endpoints exist in SentinelX. Please specify which hostname or agent ID you want to inspect.", candidates
+        candidates = [{"hostname": m.hostname, "agent_id": m.agent_id, "platform": m.platform, "status": m.status} for m in all_agents if check_user_authorized(m)]
+        return None, "Multiple enrolled endpoints exist in SentinelX. Please specify which agent ID you want to inspect.", candidates
 
     async def get_endpoint_suspicious_activity(
         self,
@@ -296,7 +368,7 @@ class SecurityAssistantTools:
         since_dt = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         try:
-            # 1. Resolve endpoint identity
+            # 1. Resolve endpoint identity deterministically
             agent_match, err_msg, candidates = await self.resolve_endpoint_agent(
                 hostname=hostname,
                 agent_id=agent_id,
@@ -323,15 +395,10 @@ class SecurityAssistantTools:
                     "analytical_hypotheses": [],
                 }
 
-            # 2. Query AgentTelemetry
+            # 2. Query AgentTelemetry (Return newest records, sorted by actual timestamp)
             tel_stmt = (
                 select(AgentTelemetry)
-                .where(
-                    and_(
-                        AgentTelemetry.agent_id == agent_match.id,
-                        AgentTelemetry.event_timestamp >= since_dt,
-                    )
-                )
+                .where(AgentTelemetry.agent_id == agent_match.id)
                 .order_by(AgentTelemetry.event_timestamp.desc())
                 .limit(limit)
             )
@@ -340,13 +407,14 @@ class SecurityAssistantTools:
             for t in tel_res.scalars().all():
                 payload = dict(t.payload or {})
                 details_parts = []
-                for k in ("process_name", "command_line", "event_id", "user", "username", "destination_ip", "dest_port", "file_path", "source"):
-                    if k in payload and payload[k]:
-                        details_parts.append(f"{k}={payload[k]}")
+                for k in ("process_name", "command_line", "protocol", "local_port", "remote_port", "local_address", "remote_address", "connection_state", "pid", "username", "user", "file_path", "destination_ip"):
+                    if k in payload and payload[k] is not None and str(payload[k]).strip() != "":
+                        details_parts.append(f"{k}: {payload[k]}")
                 details_str = ", ".join(details_parts[:4]) if details_parts else "Standard telemetry payload"
 
                 telemetry_events.append({
                     "id": str(t.id),
+                    "event_id": str(payload.get("event_id") or str(t.id)[:8]),
                     "event_type": t.event_type,
                     "severity": t.severity,
                     "event_timestamp": t.event_timestamp.isoformat() if t.event_timestamp else None,
@@ -355,7 +423,7 @@ class SecurityAssistantTools:
                     "details": details_str,
                 })
 
-            # 3. Query related LogEntries via LogSource and Asset
+            # 3. Query related LogEntries via LogSource, Asset, and Hostname
             ls_stmt = select(LogSource.id).where(
                 or_(
                     LogSource.hostname.ilike(agent_match.hostname),
@@ -367,44 +435,47 @@ class SecurityAssistantTools:
             asset_stmt = select(Asset.id).where(Asset.hostname.ilike(agent_match.hostname))
             asset_ids = (await self.session.execute(asset_stmt)).scalars().all()
 
-            log_events: List[Dict[str, Any]] = []
-            log_conds = []
+            log_conds = [
+                LogEntry.message.ilike(f"%{agent_match.hostname}%"),
+            ]
             if source_ids:
                 log_conds.append(LogEntry.source_id.in_(source_ids))
             if asset_ids:
                 log_conds.append(LogEntry.asset_id.in_(asset_ids))
 
-            if log_conds:
-                log_stmt = (
-                    select(LogEntry)
-                    .where(
-                        and_(
-                            or_(*log_conds),
-                            LogEntry.event_timestamp >= since_dt,
-                        )
-                    )
-                    .order_by(LogEntry.event_timestamp.desc())
-                    .limit(limit)
-                )
-                log_res = await self.session.execute(log_stmt)
-                for l in log_res.scalars().all():
-                    log_events.append({
-                        "id": str(l.id),
-                        "event_type": l.event_type,
-                        "severity": l.log_level,
-                        "event_timestamp": l.event_timestamp.isoformat() if l.event_timestamp else None,
-                        "source": "sentinelx.log_entries",
-                        "payload": {
-                            "message": l.message,
-                            "process_name": l.process_name,
-                            "username": l.username,
-                            "source_ip": l.source_ip,
-                            "destination_ip": l.destination_ip,
-                            "event_id": l.event_id,
-                            "category": l.category,
-                        },
-                        "details": l.message or f"Event {l.event_type} (ID: {l.event_id})",
-                    })
+            log_stmt = (
+                select(LogEntry)
+                .where(or_(*log_conds))
+                .order_by(LogEntry.event_timestamp.desc())
+                .limit(limit)
+            )
+            log_res = await self.session.execute(log_stmt)
+            log_events: List[Dict[str, Any]] = []
+            for l in log_res.scalars().all():
+                source_display = "sentinelx.log_entries"
+                if hasattr(l, "source") and l.source and hasattr(l.source, "name"):
+                    source_display = l.source.name
+                elif hasattr(l, "source") and isinstance(l.source, str):
+                    source_display = l.source
+
+                log_events.append({
+                    "id": str(l.id),
+                    "event_id": str(l.event_id or str(l.id)[:8]),
+                    "event_type": l.event_type,
+                    "severity": l.log_level,
+                    "event_timestamp": l.event_timestamp.isoformat() if l.event_timestamp else None,
+                    "source": source_display,
+                    "payload": {
+                        "message": l.message,
+                        "process_name": l.process_name,
+                        "username": l.username,
+                        "source_ip": l.source_ip,
+                        "destination_ip": l.destination_ip,
+                        "event_id": l.event_id,
+                        "category": l.category,
+                    },
+                    "details": l.message or f"Event {l.event_type} (ID: {l.event_id})",
+                })
 
             # 4. Query SecurityAlerts linked to agent
             alt_stmt = (

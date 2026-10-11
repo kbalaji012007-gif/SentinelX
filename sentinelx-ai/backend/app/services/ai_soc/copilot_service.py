@@ -40,10 +40,11 @@ class AICopilotService:
     # Context & Intent Extraction
     # ────────────────────────────────────────────────────────────────────────
     def _extract_recent_entities(self, history_messages: List[AIChatMessage]) -> Dict[str, Optional[str]]:
-        """Extract recently discussed IP, hostname, alert ID, incident, or MITRE technique."""
+        """Extract recently discussed IP, hostname, alert ID, incident, MITRE technique, or agent ID."""
         context = {
             "last_ip": None,
             "last_host": None,
+            "last_agent_id": None,
             "last_alert": None,
             "last_incident": None,
             "last_technique": None,
@@ -52,14 +53,24 @@ class AICopilotService:
 
         # Scan backwards through history
         for msg in reversed(history_messages):
-            text = msg.content
+            text = msg.content or ""
             if not context["last_ip"]:
                 ip_match = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
                 if ip_match and not ip_match.group(0).startswith("127."):
                     context["last_ip"] = ip_match.group(0)
 
+            if not context["last_agent_id"]:
+                if msg.sender == "User":
+                    u_match = re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", text)
+                    if u_match:
+                        context["last_agent_id"] = u_match.group(1)
+                elif msg.sender == "Copilot" and "Host Security Records:" in text:
+                    u_match = re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", text)
+                    if u_match:
+                        context["last_agent_id"] = u_match.group(1)
+
             if not context["last_host"]:
-                host_match = re.search(r"\b(WIN-[A-Z0-9-]+|WORKSTATION-\d+|DC-\d+|laptop|LAPTOP-[A-Z0-9]+)\b", text, re.IGNORECASE)
+                host_match = re.search(r"\b(WIN-[A-Za-z0-9_-]+|WORKSTATION-[A-Za-z0-9_-]+|DESKTOP-[A-Za-z0-9_-]+|LAPTOP-[A-Za-z0-9_-]+|DC-[A-Za-z0-9_-]+|SHETTY)\b", text, re.IGNORECASE)
                 if host_match:
                     context["last_host"] = host_match.group(0)
 
@@ -109,6 +120,46 @@ class AICopilotService:
         confidence_reason = "Evaluated against live SentinelX database records."
         response_markdown = ""
 
+        # Check for explicit UUID or agent identifier in CURRENT query
+        query_uuid_match = re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", query)
+        query_agt_match = re.search(r"\b(AGT-[A-Za-z0-9_-]+)\b", query, re.IGNORECASE)
+        explicit_agent_id = None
+        if query_uuid_match:
+            explicit_agent_id = query_uuid_match.group(1)
+        elif query_agt_match:
+            explicit_agent_id = query_agt_match.group(1)
+
+        # Determine if this query targets endpoint inspection
+        is_endpoint_query = False
+        if explicit_agent_id:
+            is_endpoint_query = True
+        elif any(term in q_lower for term in [
+            "laptop",
+            "workstation",
+            "endpoint security",
+            "endpoint telemetry",
+            "windows laptop",
+            "security events",
+            "laptop security",
+            "suspicious activities on my",
+            "suspicious activities happened on my",
+            "events on my laptop",
+            "events on my workstation",
+            "activities happened on my laptop",
+            "my laptop",
+            "desktop-",
+            "win-",
+            "workstation-",
+            "agent telemetry",
+            "endpoint",
+            "shetty",
+        ]) and not any(other in q_lower for other in ["failed login", "brute force", "failed logon", "offline endpoints", "which endpoints are currently offline", "highest-risk assets"]):
+            is_endpoint_query = True
+        elif history and len(history) > 0:
+            last_copilot = next((m for m in reversed(history) if m.sender == "Copilot"), None)
+            if last_copilot and any(marker in (last_copilot.content or "") for marker in ["Endpoint Resolution Required", "Accessible Enrolled Endpoints", "Host Security Records:"]):
+                is_endpoint_query = True
+
         # ── 1. Critical Security Alerts ─────────────────────────────────────
         if any(term in q_lower for term in ["critical security alert", "critical alert", "show me all critical alerts", "show critical alerts"]):
             intent = "List Critical Security Alerts"
@@ -132,29 +183,17 @@ class AICopilotService:
             response_markdown = self._format_alerts_response(items, "Critical")
 
         # ── 2. Laptop / Endpoint Suspicious Activity & Security Events ───────
-        elif any(term in q_lower for term in [
-            "laptop",
-            "workstation",
-            "endpoint security",
-            "endpoint telemetry",
-            "windows laptop",
-            "security events",
-            "laptop security",
-            "suspicious activities on my",
-            "suspicious activities happened on my",
-            "events on my laptop",
-            "events on my workstation",
-            "activities happened on my laptop",
-            "my laptop",
-            "desktop-",
-            "win-",
-            "workstation-",
-            "agent telemetry",
-        ]) and not any(other in q_lower for other in ["failed login", "brute force", "failed logon", "offline endpoints", "which endpoints are currently offline", "highest-risk assets"]):
+        elif is_endpoint_query:
             intent = "Inspect Laptop / Endpoint Suspicious Activities"
             tool_used = "get_endpoint_suspicious_activity"
+
+            # Deterministic resolution: When an explicit agent ID or UUID is given, DO NOT use hostname matching.
+            target_agent_id = explicit_agent_id or context_entities.get("last_agent_id")
+            target_hostname = None if target_agent_id else context_entities.get("last_host")
+
             raw_results = await self.tools.get_endpoint_suspicious_activity(
-                hostname=context_entities["last_host"],
+                hostname=target_hostname,
+                agent_id=target_agent_id,
                 query_text=query,
                 user=current_user,
                 platform="Windows" if "windows" in q_lower else None,
@@ -226,7 +265,7 @@ class AICopilotService:
                     confidence_score = 88
                     confidence_reason = "Direct match from live agent_telemetry and log_entries records."
                 else:
-                    insufficient_evidence = f"0 security events or anomalous telemetry records were recorded for host '{host_info['hostname']}' in the database within the last 72 hours."
+                    insufficient_evidence = f"0 security events or anomalous telemetry records were recorded for host '{host_info['hostname']}' in the database."
                     ai_inferences.append("Endpoint is operating within normal baseline limits with no active indicators of compromise.")
                     confidence_score = 90
                     confidence_reason = "Verified against database: Zero matching records in agent_telemetry and log_entries."
@@ -479,6 +518,21 @@ class AICopilotService:
         return md
 
     def _format_unresolved_endpoint_response(self, query: str, error_msg: Optional[str], candidates: List[Dict[str, Any]]) -> str:
+        if not candidates:
+            if error_msg and "access denied" in error_msg.lower():
+                return (
+                    f"### ⛔ Access Denied\n\n"
+                    f"**User Inquiry:** *\"{query}\"*\n\n"
+                    f"{error_msg}\n\n"
+                    f"🔒 *Access to this endpoint is restricted by role-based access control.*"
+                )
+            return (
+                f"### ❌ Endpoint Not Found\n\n"
+                f"**User Inquiry:** *\"{query}\"*\n\n"
+                f"{error_msg or 'The requested endpoint was not found in enrolled endpoint agents.'}\n\n"
+                f"⚠️ *Verified against live SentinelX database: 0 matching records.*"
+            )
+
         md = "### ⚠️ Endpoint Resolution Required\n\n"
         md += f"**User Inquiry:** *\"{query}\"*\n\n"
         if error_msg:
@@ -490,7 +544,7 @@ class AICopilotService:
             for c in candidates:
                 md += f"| **{c['hostname']}** | `{c['agent_id']}` | {c.get('platform', 'Unknown')} | `{c.get('status', 'Unknown')}` |\n"
             md += "\n"
-        md += "👉 *Please specify the target hostname or agent ID to inspect (e.g., `\"Show security events on WIN-LAPTOP-01\"`). SentinelX will not guess or assume an endpoint.*"
+        md += "👉 *Please specify the target agent ID to inspect (e.g., `\"Show security events on b7210744-d5cc-4563-ad2f-5b0d4d6be586\"`). SentinelX will not guess or assume an endpoint.*"
         return md
 
     def _format_endpoint_error_response(self, query: str, error_msg: str) -> str:
@@ -516,14 +570,14 @@ class AICopilotService:
         platform = host_info.get("platform", "Windows")
         os_ver = host_info.get("os_version", "Windows 11")
         agent_ver = host_info.get("agent_version", "1.0.0")
+        conn_status = host_info.get("status") or verification.get("connectivity_status", "Unknown")
 
         md = f"### 💻 Host Security Records: `{host}` (`{agent_id}`)\n\n"
         md += f"- **Operating Platform:** {platform} ({os_ver})\n"
         md += f"- **Agent Version:** {agent_ver}\n"
-        md += f"- **Inspection Window:** Last 72 Hours\n\n"
+        md += f"- **Agent Status:** `{conn_status}`\n\n"
 
         # Verification section
-        conn_status = verification.get("connectivity_status", "Unknown")
         last_seen = verification.get("last_seen") or "Unknown"
         agent_disabled = verification.get("agent_disabled", False)
         is_isolated = verification.get("host_isolated", False)
@@ -533,31 +587,47 @@ class AICopilotService:
         md += "| Safeguard / Verification Dimension | Verified State | Evaluation Detail |\n"
         md += "| :--- | :--- | :--- |\n"
         md += f"| **Endpoint Connectivity** | `{conn_status}` | Last seen: {last_seen} |\n"
-        md += f"| **EDR Agent Disablement** | `{'Disabled by Admin' if agent_disabled else 'Active (Not Disabled)'}` | Live agent telemetry link |\n"
+        md += f"| **EDR Agent Disablement** | `{'Disabled by Admin (Revoked)' if agent_disabled else 'Active (Not Disabled)'}` | Live agent telemetry link |\n"
         md += f"| **Host Network Isolation** | `{'Isolated (Verified via SOAR)' if is_isolated else 'Not Isolated (Unverified)'}` | {iso_note} |\n"
         md += f"| **Active Safeguards** | `{'Network Isolation Active' if is_isolated else 'EDR Ingestion Active (Not Quarantined)'}` | Checked against SOAR execution history |\n\n"
 
-        # Merge telemetry, log_entries, and alerts for event timeline
-        all_events = []
-        for t in telemetry:
-            all_events.append({
-                "ts": t.get("event_timestamp") or "N/A",
-                "source": t.get("source", "sentinelx.agent_telemetry"),
-                "type": t.get("event_type", "Telemetry"),
-                "severity": t.get("severity", "INFO"),
-                "details": t.get("details", "Standard event"),
-            })
-        for l in log_entries:
-            all_events.append({
-                "ts": l.get("event_timestamp") or "N/A",
-                "source": l.get("source", "sentinelx.log_entries"),
-                "type": l.get("event_type", "Log"),
-                "severity": l.get("severity", "INFO"),
-                "details": l.get("details", "Log event"),
-            })
+        # 1. Endpoint Telemetry Section (Clearly distinguished from Correlated Logs)
+        md += "#### 🛰️ Live Endpoint Telemetry (`sentinelx.agent_telemetry`)\n\n"
+        if telemetry:
+            md += f"Retrieved **{min(len(telemetry), 5)}** newest telemetry records (sorted by actual timestamp):\n\n"
+            md += "| Timestamp (UTC) | Event ID | Severity | Source | Event Type | Relevant Payload Fields |\n"
+            md += "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+            for t in telemetry[:5]:
+                ts = t.get("event_timestamp") or "N/A"
+                evt_id = t.get("event_id") or t.get("id", "N/A")[:8]
+                sev = t.get("severity", "INFO")
+                src = t.get("source", f"AgentTelemetry ({host})")
+                etype = t.get("event_type", "Telemetry")
+                details = t.get("details", "Standard event")
+                md += f"| `{ts}` | `{evt_id}` | `{sev}` | `{src}` | `{etype}` | {details} |\n"
+            md += "\n"
+        else:
+            md += "✅ **Zero (0) matching records were found in `sentinelx.agent_telemetry` for this endpoint.**\n\n"
 
-        all_events.sort(key=lambda x: str(x["ts"]), reverse=True)
+        # 2. Correlated Security Logs Section
+        md += "#### 📜 Correlated Security Logs (`sentinelx.log_entries`)\n\n"
+        if log_entries:
+            md += f"Retrieved **{min(len(log_entries), 5)}** newest correlated security log records (sorted by actual timestamp):\n\n"
+            md += "| Timestamp (UTC) | Event ID | Severity | Source | Event Type | Relevant Payload Fields |\n"
+            md += "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
+            for l in log_entries[:5]:
+                ts = l.get("event_timestamp") or "N/A"
+                evt_id = l.get("event_id") or l.get("id", "N/A")[:8]
+                sev = l.get("severity", "INFO")
+                src = l.get("source", "sentinelx.log_entries")
+                etype = l.get("event_type", "Log")
+                details = l.get("details", "Log event")
+                md += f"| `{ts}` | `{evt_id}` | `{sev}` | `{src}` | `{etype}` | {details} |\n"
+            md += "\n"
+        else:
+            md += "✅ **Zero (0) matching records were found in `sentinelx.log_entries` for this endpoint.**\n\n"
 
+        # 3. Security Alerts Section
         if alerts:
             md += f"#### ⚠️ Correlated Security Alerts ({len(alerts)} Found)\n\n"
             md += "| Alert ID | Title | Severity | Status | Detected At |\n"
@@ -566,19 +636,27 @@ class AICopilotService:
                 md += f"| **{a['alert_id']}** | `{a['title']}` | `{a['severity']}` | `{a['status']}` | {a.get('detected_at', 'Recent')} |\n"
             md += "\n"
 
-        if all_events:
-            md += f"#### 📋 Latest Security Events & Telemetry Records ({len(all_events)} Retrieved)\n\n"
-            md += "| Timestamp (UTC) | Source | Event Type | Severity | Key Event Details |\n"
-            md += "| :--- | :--- | :--- | :--- | :--- |\n"
-            for ev in all_events[:8]:
-                md += f"| `{ev['ts']}` | `{ev['source']}` | `{ev['type']}` | `{ev['severity']}` | {ev['details']} |\n"
-            md += "\n"
+        # 4. MITRE ATT&CK Mapping
+        md += "#### 🥋 MITRE ATT&CK Mapping\n"
+        if observed_mitre:
+            for m in observed_mitre:
+                md += f"- **Observed Detection:** `{m['technique_id']}` — {m['name']} (Tactic: `{m['tactic']}`, Alert: `{m.get('alert_id', 'N/A')}`)\n"
+        if analytical_hypotheses:
+            for ah in analytical_hypotheses:
+                md += f"- **Analytical Hypothesis (Unconfirmed by Detection Rules):** `{ah['technique_id']}` — {ah['name']} (*{ah.get('rationale', '')}*)\n"
+        if not observed_mitre and not analytical_hypotheses:
+            md += "- **Detection Engine Status:** No MITRE ATT&CK techniques have been observed in detection records or telemetry for this endpoint.\n"
+        md += "\n"
+
+        # 5. Recommended Next Steps
+        md += "#### 🎯 Recommended Next Steps\n"
+        if alerts or any(t.get('severity') in ('ERROR', 'CRITICAL') for t in telemetry):
+            md += f"1. **Host Containment:** Recommended SOAR action `Isolate_Host` for `{host}` if malicious persistence is confirmed. *(Note: Host is currently NOT isolated — execution requires authorized confirmation).* \n"
+            md += "2. **Process Inspection:** Review parent-child process tree and collect non-volatile memory artifacts.\n"
         else:
-            md += "#### 📋 Security Events & Telemetry Records\n"
-            md += "✅ **No matching security events, anomalous telemetry records, or alerts found in the database for this endpoint within the last 72 hours.**\n\n"
-            md += "- **Observed Records in `sentinelx.agent_telemetry`:** 0\n"
-            md += "- **Observed Records in `sentinelx.log_entries`:** 0\n"
-            md += "- **Observed Records in `sentinelx.security_alerts`:** 0\n\n"
+            md += "Endpoint baseline is healthy. Telemetry agent is operating normally with no active containment actions required.\n"
+
+        return md
 
         # MITRE ATT&CK Mapping
         md += "#### 🥋 MITRE ATT&CK Mapping\n"

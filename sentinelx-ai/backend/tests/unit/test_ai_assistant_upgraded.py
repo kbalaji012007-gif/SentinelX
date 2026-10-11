@@ -13,7 +13,7 @@ Tests:
 """
 
 import pytest
-from uuid import uuid4
+from uuid import uuid4, UUID
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -435,7 +435,7 @@ async def test_regression_empty_results_no_fabrication():
 
     assert res["intent"] == "Inspect Laptop / Endpoint Suspicious Activities"
     assert "0" in res["response_markdown"]
-    assert "No matching security events" in res["response_markdown"]
+    assert "Zero (0) matching records were found" in res["response_markdown"]
     # Strictly ensure it did NOT invent generic techniques T1110 or T1071
     assert "T1110" not in res["response_markdown"]
     assert "T1071" not in res["response_markdown"]
@@ -749,5 +749,440 @@ async def test_regression_followup_messages_and_history_context():
 
     ctx = service._extract_recent_entities([msg1, msg2])
     assert ctx["last_host"] == "WIN-LAPTOP-01"
+
+
+# =========================================================================
+# ENDPOINT ID RESOLUTION & TELEMETRY REGRESSION TESTS (Critical Fix)
+# =========================================================================
+
+@pytest.mark.asyncio
+async def test_regression_explicit_uuid_selects_exact_endpoint():
+    """Requirement 1 & 2: Explicit complete agent UUID selects exact endpoint without ambiguous fallback."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    online_id = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    online_agent_id = "b7210744-d5cc-4563-ad2f-5b0d4d6be586"
+    agent_online = EndpointAgent(
+        id=online_id,
+        agent_id=online_agent_id,
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_online
+            m.scalars.return_value.all.return_value = [agent_online]
+            m.scalar_one_or_none.return_value = agent_online
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query("b7210744-d5cc-4563-ad2f-5b0d4d6be586")
+
+    assert res["intent"] == "Inspect Laptop / Endpoint Suspicious Activities"
+    assert "Host Security Records: `SHETTY` (`b7210744-d5cc-4563-ad2f-5b0d4d6be586`)" in res["response_markdown"]
+    assert "Endpoint Resolution Required" not in res["response_markdown"]
+    assert "`Online`" in res["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_explicit_uuid_overrides_ambiguous_hostname():
+    """Requirement 2: Explicit UUID overrides ambiguous hostname matching even if multiple hosts match."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    online_id = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    online_agent_id = "b7210744-d5cc-4563-ad2f-5b0d4d6be586"
+    agent_online = EndpointAgent(
+        id=online_id,
+        agent_id=online_agent_id,
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_online
+            m.scalars.return_value.all.return_value = [agent_online]
+            m.scalar_one_or_none.return_value = agent_online
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query("Inspect host SHETTY with agent b7210744-d5cc-4563-ad2f-5b0d4d6be586")
+
+    assert res["intent"] == "Inspect Laptop / Endpoint Suspicious Activities"
+    assert "Host Security Records: `SHETTY` (`b7210744-d5cc-4563-ad2f-5b0d4d6be586`)" in res["response_markdown"]
+    assert "Endpoint Resolution Required" not in res["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_followup_uuid_selection_in_conversation():
+    """Requirement 3: Follow-up message containing candidate UUID resolves correctly in same conversation."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    user = User(id=uuid4(), email="kbalaji@sentinelx.ai", first_name="K", last_name="Balaji")
+    from app.models.role import Role
+    user.role = Role(name="Super Administrator")
+
+    conv_id = uuid4()
+    req = AIChatRequest(
+        conversation_id=conv_id,
+        message="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+    )
+
+    online_id = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    online_agent_id = "b7210744-d5cc-4563-ad2f-5b0d4d6be586"
+    agent_online = EndpointAgent(
+        id=online_id,
+        agent_id=online_agent_id,
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    mock_conv = AIChatConversation(id=conv_id, title="Endpoint Chat", user_id=user.id)
+    msg1 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=conv_id,
+        sender="User",
+        content="What suspicious activities happened on my Windows laptop?",
+    )
+    msg2 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=conv_id,
+        sender="Copilot",
+        content="Endpoint Resolution Required. Multiple Windows endpoints are enrolled for hostname SHETTY.",
+    )
+    mock_conv.messages = [msg1, msg2]
+
+    service.chat_repo = MagicMock()
+    service.chat_repo.get_with_messages = AsyncMock(return_value=mock_conv)
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_online
+            m.scalars.return_value.all.return_value = [agent_online]
+            m.scalar_one_or_none.return_value = agent_online
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.chat_interaction(req, user_name="K Balaji", current_user=user)
+
+    assert res.sender == "Copilot"
+    assert "Host Security Records: `SHETTY` (`b7210744-d5cc-4563-ad2f-5b0d4d6be586`)" in res.content
+    assert "Endpoint Resolution Required" not in res.content
+    assert "`Online`" in res.content
+
+
+@pytest.mark.asyncio
+async def test_regression_unknown_uuid_returns_clear_not_found():
+    """Requirement 2.5: Unknown agent UUID returns clear 'Endpoint not found' response without guessing."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    def mock_query(stmt):
+        m = MagicMock()
+        m.scalars.return_value.first.return_value = None
+        m.scalars.return_value.all.return_value = []
+        m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    unknown_uuid = "00000000-0000-0000-0000-000000000000"
+    res = await service.interpret_and_execute_query(unknown_uuid)
+
+    assert "Endpoint Not Found" in res["response_markdown"]
+    assert "not found in enrolled endpoint agents" in res["response_markdown"]
+    assert "0 matching records" in res["response_markdown"]
+    assert "Endpoint Resolution Required" not in res["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_unauthorized_endpoint_access_denied():
+    """Requirement 2.6: Unauthorized access to an endpoint is denied without disclosing restricted details."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    from app.models.role import Role
+    unauthorized_user = User(
+        id=uuid4(),
+        email="guest@external.com",
+        first_name="Guest",
+        last_name="User",
+        role=Role(name="Guest"),
+    )
+
+    target_id = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    target_uuid_str = "b7210744-d5cc-4563-ad2f-5b0d4d6be586"
+    restricted_agent = EndpointAgent(
+        id=target_id,
+        agent_id=target_uuid_str,
+        hostname="SECRET-FINANCE-01",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = restricted_agent
+            m.scalars.return_value.all.return_value = [restricted_agent]
+            m.scalar_one_or_none.return_value = restricted_agent
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query(target_uuid_str, current_user=unauthorized_user)
+
+    assert "Access Denied" in res["response_markdown"]
+    assert "You are not authorized to access this endpoint" in res["response_markdown"]
+    assert "SECRET-FINANCE-01" not in res["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_revoked_and_online_endpoints_never_confused():
+    """Requirement 2 & 5: Revoked and Online endpoint IDs on the same host are never confused."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    revoked_uuid = "722abbe4-7715-41a0-8d16-5334bb378cff"
+    online_uuid = "b7210744-d5cc-4563-ad2f-5b0d4d6be586"
+
+    agent_revoked = EndpointAgent(
+        id=UUID("7076bed3-10cf-470e-9ed6-044c294287c6"),
+        agent_id=revoked_uuid,
+        hostname="SHETTY",
+        platform="Windows",
+        status="Revoked",
+        last_seen=datetime.now(timezone.utc),
+    )
+    agent_online = EndpointAgent(
+        id=UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7"),
+        agent_id=online_uuid,
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            params = {}
+            try:
+                params = stmt.compile().params
+            except Exception:
+                pass
+            params_str = str(params).lower()
+            if revoked_uuid.lower() in params_str or "7076bed3" in params_str:
+                m.scalars.return_value.first.return_value = agent_revoked
+                m.scalars.return_value.all.return_value = [agent_revoked]
+            elif online_uuid.lower() in params_str or "3e70f0fb" in params_str:
+                m.scalars.return_value.first.return_value = agent_online
+                m.scalars.return_value.all.return_value = [agent_online]
+            else:
+                m.scalars.return_value.first.return_value = None
+                m.scalars.return_value.all.return_value = []
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    # 1. Query revoked endpoint
+    res_revoked = await service.interpret_and_execute_query(revoked_uuid)
+    assert revoked_uuid in res_revoked["response_markdown"]
+    assert "Revoked" in res_revoked["response_markdown"]
+    assert online_uuid not in res_revoked["response_markdown"]
+
+    # 2. Query online endpoint
+    res_online = await service.interpret_and_execute_query(online_uuid)
+    assert online_uuid in res_online["response_markdown"]
+    assert "Online" in res_online["response_markdown"]
+    assert revoked_uuid not in res_online["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_selected_endpoint_telemetry_queried_and_distinguished():
+    """Requirement 4: Retrieve matching agent_telemetry and correlated log_entries, clearly distinguished."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    online_id = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    online_agent_id = "b7210744-d5cc-4563-ad2f-5b0d4d6be586"
+    agent_online = EndpointAgent(
+        id=online_id,
+        agent_id=online_agent_id,
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    now = datetime.now(timezone.utc)
+    telemetry_record = AgentTelemetry(
+        id=uuid4(),
+        agent_id=online_id,
+        event_type="Process_Creation",
+        severity="HIGH",
+        event_timestamp=now,
+        source="AgentTelemetry (SHETTY)",
+        payload={"process_name": "cmd.exe", "command_line": "whoami /all", "event_id": "EVT-4688"},
+    )
+    log_record = LogEntry(
+        id=uuid4(),
+        source_id=uuid4(),
+        event_type="Process_Execution",
+        log_level="HIGH",
+        event_timestamp=now,
+        message="A new process was created: cmd.exe on SHETTY",
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_online
+            m.scalars.return_value.all.return_value = [agent_online]
+            m.scalar_one_or_none.return_value = agent_online
+        elif "agent_telemetry" in s_str:
+            m.scalars.return_value.all.return_value = [telemetry_record]
+        elif "log_entries" in s_str:
+            m.scalars.return_value.all.return_value = [log_record]
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query(online_agent_id)
+
+    md = res["response_markdown"]
+    assert "Live Endpoint Telemetry (`sentinelx.agent_telemetry`)" in md
+    assert "Correlated Security Logs (`sentinelx.log_entries`)" in md
+    assert "EVT-4688" in md or "cmd.exe" in md
+    assert "Microsoft-Windows-Security-Auditing" in md or "A new process was created" in md
+
+
+@pytest.mark.asyncio
+async def test_regression_empty_telemetry_returns_zero_records():
+    """Requirement 4: Empty telemetry explicitly states 0 records found without inventing fake data."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    online_id = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    online_agent_id = "b7210744-d5cc-4563-ad2f-5b0d4d6be586"
+    agent_online = EndpointAgent(
+        id=online_id,
+        agent_id=online_agent_id,
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_online
+            m.scalars.return_value.all.return_value = [agent_online]
+            m.scalar_one_or_none.return_value = agent_online
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query(online_agent_id)
+
+    md = res["response_markdown"]
+    assert "Zero (0) matching records were found in `sentinelx.agent_telemetry`" in md
+    assert "Zero (0) matching records were found in `sentinelx.log_entries`" in md
+    assert "T1110" not in md
+    assert "T1071" not in md
+
+
+@pytest.mark.asyncio
+async def test_regression_assistant_does_not_repeat_disambiguation_after_valid_selection():
+    """Requirement 5: Assistant never repeats disambiguation list once valid agent ID is selected."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    online_id = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    online_agent_id = "b7210744-d5cc-4563-ad2f-5b0d4d6be586"
+    agent_online = EndpointAgent(
+        id=online_id,
+        agent_id=online_agent_id,
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_online
+            m.scalars.return_value.all.return_value = [agent_online]
+            m.scalar_one_or_none.return_value = agent_online
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query(f"Please check {online_agent_id}")
+
+    assert "Endpoint Resolution Required" not in res["response_markdown"]
+    assert "Multiple Windows endpoints are enrolled" not in res["response_markdown"]
+    assert "Accessible Enrolled Endpoints" not in res["response_markdown"]
+    assert "Host Security Records: `SHETTY` (`b7210744-d5cc-4563-ad2f-5b0d4d6be586`)" in res["response_markdown"]
+
 
 
