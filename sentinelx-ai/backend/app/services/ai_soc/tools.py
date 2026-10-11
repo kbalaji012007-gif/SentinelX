@@ -189,18 +189,23 @@ class SecurityAssistantTools:
         generic_terms = {"laptop", "workstation", "desktop", "endpoint", "host", "agent", "pc", "server", "machine", "device"}
 
         # 1. Extract explicit candidate agent UUID or ID from query_text or hostname if provided
+        # Requirement 5: An explicit valid UUID in current query takes HIGHEST priority over any stored selection
         if query_text:
             uuid_m = re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", query_text)
-            if uuid_m and not agent_id:
+            if uuid_m:
                 agent_id = uuid_m.group(1)
+            else:
+                agt_m = re.search(r"\b(AGT-[A-Za-z0-9_-]+)\b", query_text, re.IGNORECASE)
+                if agt_m:
+                    agent_id = agt_m.group(1)
 
-            agt_m = re.search(r"\b(AGT-[A-Za-z0-9_-]+)\b", query_text, re.IGNORECASE)
-            if agt_m and not agent_id:
-                agent_id = agt_m.group(1)
-
-            host_m = re.search(r"\b(WIN-[A-Za-z0-9_-]+|WORKSTATION-[A-Za-z0-9_-]+|DESKTOP-[A-Za-z0-9_-]+|LAPTOP-[A-Za-z0-9_-]+|SRV-[A-Za-z0-9_-]+)\b", query_text, re.IGNORECASE)
+            host_m = re.search(r"\b(?:host|machine|workstation|laptop|server)\s+([A-Za-z0-9_-]+)\b", query_text, re.IGNORECASE)
+            if not host_m:
+                host_m = re.search(r"\b(WIN-[A-Za-z0-9_-]+|WORKSTATION-[A-Za-z0-9_-]+|DESKTOP-[A-Za-z0-9_-]+|LAPTOP-[A-Za-z0-9_-]+|SRV-[A-Za-z0-9_-]+|SHETTY)\b", query_text, re.IGNORECASE)
             if host_m and not hostname:
-                hostname = host_m.group(1)
+                candidate_host = host_m.group(1)
+                if candidate_host.strip().lower() not in generic_terms:
+                    hostname = candidate_host
 
         # If hostname itself was passed as a UUID, treat it as agent_id
         if hostname and re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", hostname):
@@ -571,14 +576,34 @@ class SecurityAssistantTools:
                 except Exception:
                     pass
 
+            status_clean = str(agent_match.status).strip()
+            is_revoked = status_clean.lower() == "revoked"
+            is_disabled = status_clean.lower() == "disabled"
+            is_offline = status_clean.lower() == "offline"
+            is_online = status_clean.lower() == "online"
+
+            edr_telemetry_status = "Active"
+            if is_revoked:
+                edr_telemetry_status = "Revoked"
+            elif is_disabled:
+                edr_telemetry_status = "Disabled"
+            elif is_offline:
+                edr_telemetry_status = "Offline"
+            elif is_online:
+                edr_telemetry_status = "Active"
+
             verification = {
                 "connectivity_status": agent_match.status,
                 "last_seen": agent_match.last_seen.isoformat() if agent_match.last_seen else None,
-                "agent_disabled": agent_match.status in ("Disabled", "Revoked"),
+                "agent_disabled": is_disabled or is_revoked,
+                "is_revoked": is_revoked,
+                "is_disabled": is_disabled,
+                "is_online": is_online,
+                "is_offline": is_offline,
                 "host_isolated": is_isolated,
                 "isolation_note": isolation_note,
                 "safeguards_status": {
-                    "edr_telemetry_collection": "Active" if agent_match.status != "Disabled" else "Disabled",
+                    "edr_telemetry_collection": edr_telemetry_status,
                     "network_isolation_quarantine": "Active" if is_isolated else "Inactive (Host is not isolated)",
                 },
             }

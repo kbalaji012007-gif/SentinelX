@@ -40,7 +40,7 @@ class AICopilotService:
     # Context & Intent Extraction
     # ────────────────────────────────────────────────────────────────────────
     def _extract_recent_entities(self, history_messages: List[AIChatMessage]) -> Dict[str, Optional[str]]:
-        """Extract recently discussed IP, hostname, alert ID, incident, MITRE technique, or agent ID."""
+        """Extract recently discussed IP, hostname, alert ID, incident, MITRE technique, or selected agent ID."""
         context = {
             "last_ip": None,
             "last_host": None,
@@ -51,28 +51,40 @@ class AICopilotService:
             "last_intent": None,
         }
 
-        # Scan backwards through history
+        # Scan backwards through history for the most recent explicit selection or context
         for msg in reversed(history_messages):
             text = msg.content or ""
+            sender = (msg.sender or "").lower()
+
             if not context["last_ip"]:
                 ip_match = re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text)
                 if ip_match and not ip_match.group(0).startswith("127."):
                     context["last_ip"] = ip_match.group(0)
 
             if not context["last_agent_id"]:
-                if msg.sender == "User":
+                # If User explicitly provided a UUID or AGT- ID:
+                if sender in ("user", "human"):
                     u_match = re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", text)
+                    agt_m = re.search(r"\b(AGT-[A-Za-z0-9_-]+)\b", text, re.IGNORECASE)
                     if u_match:
                         context["last_agent_id"] = u_match.group(1)
-                elif msg.sender == "Copilot" and "Host Security Records:" in text:
-                    u_match = re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", text)
+                    elif agt_m:
+                        context["last_agent_id"] = agt_m.group(1)
+                # If Copilot confirmed host security records for an endpoint:
+                # Strictly ignore Copilot messages containing candidate tables ("Endpoint Resolution Required" / "Accessible Enrolled Endpoints")
+                elif sender in ("copilot", "assistant") and "Host Security Records:" in text and "Endpoint Resolution Required" not in text:
+                    u_match = re.search(r"Host Security Records:.*?`\s*\(([0-9a-fA-F-]{36}|AGT-[A-Za-z0-9_-]+)\)", text)
+                    if not u_match:
+                        u_match = re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", text)
                     if u_match:
                         context["last_agent_id"] = u_match.group(1)
 
             if not context["last_host"]:
-                host_match = re.search(r"\b(WIN-[A-Za-z0-9_-]+|WORKSTATION-[A-Za-z0-9_-]+|DESKTOP-[A-Za-z0-9_-]+|LAPTOP-[A-Za-z0-9_-]+|DC-[A-Za-z0-9_-]+|SHETTY)\b", text, re.IGNORECASE)
-                if host_match:
-                    context["last_host"] = host_match.group(0)
+                # Only extract hostname if it is an explicit host or from confirmed records (not candidate list)
+                if "Endpoint Resolution Required" not in text:
+                    host_match = re.search(r"\b(WIN-[A-Za-z0-9_-]+|WORKSTATION-[A-Za-z0-9_-]+|DESKTOP-[A-Za-z0-9_-]+|LAPTOP-[A-Za-z0-9_-]+|DC-[A-Za-z0-9_-]+|SHETTY)\b", text, re.IGNORECASE)
+                    if host_match:
+                        context["last_host"] = host_match.group(0)
 
             if not context["last_alert"]:
                 alt_match = re.search(r"\b(ALT-[A-Za-z0-9-]+)\b", text)
@@ -120,7 +132,7 @@ class AICopilotService:
         confidence_reason = "Evaluated against live SentinelX database records."
         response_markdown = ""
 
-        # Check for explicit UUID or agent identifier in CURRENT query
+        # Check for explicit UUID or agent identifier in CURRENT query (Highest Priority)
         query_uuid_match = re.search(r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b", query)
         query_agt_match = re.search(r"\b(AGT-[A-Za-z0-9_-]+)\b", query, re.IGNORECASE)
         explicit_agent_id = None
@@ -128,6 +140,25 @@ class AICopilotService:
             explicit_agent_id = query_uuid_match.group(1)
         elif query_agt_match:
             explicit_agent_id = query_agt_match.group(1)
+
+        # Extract requested event/record limit if specified in query
+        requested_limit = 20
+        word_numbers = {
+            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+            "fifteen": 15, "twenty": 20, "twenty-five": 25, "fifty": 50,
+        }
+        limit_num_match = re.search(r"\b(?:latest|last|top|show|get)\s+(\d+)\b", q_lower)
+        limit_word_match = re.search(r"\b(?:latest|last|top|show|get)\s+(" + "|".join(word_numbers.keys()) + r")\b", q_lower)
+        if limit_num_match:
+            requested_limit = int(limit_num_match.group(1))
+        elif limit_word_match:
+            requested_limit = word_numbers[limit_word_match.group(1)]
+        else:
+            num_match = re.search(r"\b(\d+)\s+(?:events?|logs?|records?|telemetr)", q_lower)
+            if num_match:
+                requested_limit = int(num_match.group(1))
+        requested_limit = min(max(1, requested_limit), 50)
 
         # Determine if this query targets endpoint inspection
         is_endpoint_query = False
@@ -156,7 +187,7 @@ class AICopilotService:
         ]) and not any(other in q_lower for other in ["failed login", "brute force", "failed logon", "offline endpoints", "which endpoints are currently offline", "highest-risk assets"]):
             is_endpoint_query = True
         elif history and len(history) > 0:
-            last_copilot = next((m for m in reversed(history) if m.sender == "Copilot"), None)
+            last_copilot = next((m for m in reversed(history) if (m.sender or "").lower() in ("copilot", "assistant")), None)
             if last_copilot and any(marker in (last_copilot.content or "") for marker in ["Endpoint Resolution Required", "Accessible Enrolled Endpoints", "Host Security Records:"]):
                 is_endpoint_query = True
 
@@ -187,7 +218,10 @@ class AICopilotService:
             intent = "Inspect Laptop / Endpoint Suspicious Activities"
             tool_used = "get_endpoint_suspicious_activity"
 
-            # Deterministic resolution: When an explicit agent ID or UUID is given, DO NOT use hostname matching.
+            # Deterministic resolution:
+            # 1. Explicit agent ID or UUID in CURRENT message takes highest priority.
+            # 2. If no explicit ID in current message, preserve selected agent ID from this conversation's history.
+            # 3. If an agent ID is resolved, do NOT use ambiguous hostname matching.
             target_agent_id = explicit_agent_id or context_entities.get("last_agent_id")
             target_hostname = None if target_agent_id else context_entities.get("last_host")
 
@@ -198,7 +232,7 @@ class AICopilotService:
                 user=current_user,
                 platform="Windows" if "windows" in q_lower else None,
                 hours=72,
-                limit=20,
+                limit=requested_limit,
             )
 
             status = raw_results.get("status")
@@ -278,6 +312,7 @@ class AICopilotService:
                     log_entries=log_entries,
                     observed_mitre=observed_mitre,
                     analytical_hypotheses=analytical_hypotheses,
+                    limit=requested_limit,
                 )
 
         # ── 3. Failed Logins & Brute Force Analysis ─────────────────────────
@@ -564,6 +599,7 @@ class AICopilotService:
         log_entries: List[Dict[str, Any]],
         observed_mitre: List[Dict[str, Any]],
         analytical_hypotheses: List[Dict[str, Any]],
+        limit: int = 20,
     ) -> str:
         host = host_info.get("hostname", "Endpoint Host")
         agent_id = host_info.get("agent_id", "N/A")
@@ -577,27 +613,45 @@ class AICopilotService:
         md += f"- **Agent Version:** {agent_ver}\n"
         md += f"- **Agent Status:** `{conn_status}`\n\n"
 
-        # Verification section
+        # Verification section - accurately distinguish states without guessing recent heartbeats
         last_seen = verification.get("last_seen") or "Unknown"
         agent_disabled = verification.get("agent_disabled", False)
         is_isolated = verification.get("host_isolated", False)
         iso_note = verification.get("isolation_note", "Host is NOT verified as isolated.")
 
+        status_str = str(conn_status).strip().lower()
+        if status_str == "revoked":
+            edr_label = "Revoked by Administrator"
+            edr_eval = "Agent certificate revoked by administrator; telemetry ingestion blocked."
+        elif status_str == "disabled":
+            edr_label = "Disabled by Administrator"
+            edr_eval = "Agent disabled by administrator; telemetry ingestion halted."
+        elif status_str == "offline":
+            edr_label = "Active (Agent Offline)"
+            edr_eval = "Endpoint is offline; telemetry ingestion paused."
+        elif status_str == "online":
+            edr_label = "Active (Not Disabled)"
+            edr_eval = "Live agent telemetry link verified."
+        else:
+            edr_label = "Disabled by Admin (Revoked)" if agent_disabled else "Active (Not Disabled)"
+            edr_eval = "Live agent telemetry link"
+
         md += "#### 🛡️ Endpoint & Safeguard State Verification\n\n"
         md += "| Safeguard / Verification Dimension | Verified State | Evaluation Detail |\n"
         md += "| :--- | :--- | :--- |\n"
         md += f"| **Endpoint Connectivity** | `{conn_status}` | Last seen: {last_seen} |\n"
-        md += f"| **EDR Agent Disablement** | `{'Disabled by Admin (Revoked)' if agent_disabled else 'Active (Not Disabled)'}` | Live agent telemetry link |\n"
+        md += f"| **EDR Agent Disablement** | `{edr_label}` | {edr_eval} |\n"
         md += f"| **Host Network Isolation** | `{'Isolated (Verified via SOAR)' if is_isolated else 'Not Isolated (Unverified)'}` | {iso_note} |\n"
         md += f"| **Active Safeguards** | `{'Network Isolation Active' if is_isolated else 'EDR Ingestion Active (Not Quarantined)'}` | Checked against SOAR execution history |\n\n"
 
         # 1. Endpoint Telemetry Section (Clearly distinguished from Correlated Logs)
         md += "#### 🛰️ Live Endpoint Telemetry (`sentinelx.agent_telemetry`)\n\n"
+        display_tel_count = min(len(telemetry), limit)
         if telemetry:
-            md += f"Retrieved **{min(len(telemetry), 5)}** newest telemetry records (sorted by actual timestamp):\n\n"
+            md += f"Retrieved **{display_tel_count}** newest telemetry records (sorted by actual timestamp):\n\n"
             md += "| Timestamp (UTC) | Event ID | Severity | Source | Event Type | Relevant Payload Fields |\n"
             md += "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
-            for t in telemetry[:5]:
+            for t in telemetry[:display_tel_count]:
                 ts = t.get("event_timestamp") or "N/A"
                 evt_id = t.get("event_id") or t.get("id", "N/A")[:8]
                 sev = t.get("severity", "INFO")
@@ -611,11 +665,12 @@ class AICopilotService:
 
         # 2. Correlated Security Logs Section
         md += "#### 📜 Correlated Security Logs (`sentinelx.log_entries`)\n\n"
+        display_log_count = min(len(log_entries), limit)
         if log_entries:
-            md += f"Retrieved **{min(len(log_entries), 5)}** newest correlated security log records (sorted by actual timestamp):\n\n"
+            md += f"Retrieved **{display_log_count}** newest correlated security log records (sorted by actual timestamp):\n\n"
             md += "| Timestamp (UTC) | Event ID | Severity | Source | Event Type | Relevant Payload Fields |\n"
             md += "| :--- | :--- | :--- | :--- | :--- | :--- |\n"
-            for l in log_entries[:5]:
+            for l in log_entries[:display_log_count]:
                 ts = l.get("event_timestamp") or "N/A"
                 evt_id = l.get("event_id") or l.get("id", "N/A")[:8]
                 sev = l.get("severity", "INFO")

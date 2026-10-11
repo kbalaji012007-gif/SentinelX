@@ -1185,4 +1185,271 @@ async def test_regression_assistant_does_not_repeat_disambiguation_after_valid_s
     assert "Host Security Records: `SHETTY` (`b7210744-d5cc-4563-ad2f-5b0d4d6be586`)" in res["response_markdown"]
 
 
+# =========================================================================
+# REGRESSION TESTS: DISAMBIGUATION, CONTEXT PRESERVATION, AND SWITCHING
+# =========================================================================
+
+@pytest.mark.asyncio
+async def test_regression_generic_query_after_selection_preserves_endpoint():
+    """Requirement 8.1: Generic query after selection preserves selected endpoint without asking again."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    online_id = UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7")
+    online_agent_id = "b7210744-d5cc-4563-ad2f-5b0d4d6be586"
+    agent_online = EndpointAgent(
+        id=online_id,
+        agent_id=online_agent_id,
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    conv_id = uuid4()
+    msg1 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=conv_id,
+        sender="User",
+        content="What suspicious activities happened on my Windows laptop?",
+    )
+    msg2 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=conv_id,
+        sender="Copilot",
+        content="### ⚠️ Endpoint Resolution Required\n\n| Hostname | Agent ID |\n| `SHETTY` | `722abbe4-7715-41a0-8d16-5334bb378cff` |\n| `SHETTY` | `b7210744-d5cc-4563-ad2f-5b0d4d6be586` |",
+    )
+    msg3 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=conv_id,
+        sender="User",
+        content="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+    )
+    msg4 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=conv_id,
+        sender="Copilot",
+        content="### 💻 Host Security Records: `SHETTY` (`b7210744-d5cc-4563-ad2f-5b0d4d6be586`)\n- **Agent Status:** `Online`",
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_online
+            m.scalars.return_value.all.return_value = [agent_online]
+            m.scalar_one_or_none.return_value = agent_online
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    # Generic query in Turn 3
+    res = await service.interpret_and_execute_query(
+        "Show me the latest five events from my Windows laptop",
+        history=[msg1, msg2, msg3, msg4],
+    )
+
+    assert "Endpoint Resolution Required" not in res["response_markdown"]
+    assert "Host Security Records: `SHETTY` (`b7210744-d5cc-4563-ad2f-5b0d4d6be586`)" in res["response_markdown"]
+    assert "`Online`" in res["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_new_conversation_asks_for_endpoint_selection():
+    """Requirement 8.2: A new conversation with multiple matching endpoints prompts disambiguation."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    agent_revoked = EndpointAgent(
+        id=UUID("7076bed3-10cf-470e-9ed6-044c294287c6"),
+        agent_id="722abbe4-7715-41a0-8d16-5334bb378cff",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Revoked",
+        last_seen=datetime.now(timezone.utc) - timedelta(days=20),
+    )
+    agent_online = EndpointAgent(
+        id=UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7"),
+        agent_id="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.all.return_value = [agent_revoked, agent_online]
+            m.scalars.return_value.first.return_value = agent_revoked
+            m.scalar_one_or_none.return_value = None
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    # Empty history = brand new conversation
+    res = await service.interpret_and_execute_query(
+        "Show me the latest five events from my Windows laptop",
+        history=[],
+    )
+
+    assert "Endpoint Resolution Required" in res["response_markdown"]
+    assert "Accessible Enrolled Endpoints" in res["response_markdown"]
+    assert "722abbe4-7715-41a0-8d16-5334bb378cff" in res["response_markdown"]
+    assert "b7210744-d5cc-4563-ad2f-5b0d4d6be586" in res["response_markdown"]
+    assert "`Revoked`" in res["response_markdown"]
+    assert "`Online`" in res["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_explicit_endpoint_switching_in_conversation():
+    """Requirement 8.3: An explicit valid UUID in current message overrides previously stored selection."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    agent_revoked = EndpointAgent(
+        id=UUID("7076bed3-10cf-470e-9ed6-044c294287c6"),
+        agent_id="722abbe4-7715-41a0-8d16-5334bb378cff",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Revoked",
+        last_seen=datetime.now(timezone.utc) - timedelta(days=20),
+    )
+
+    conv_id = uuid4()
+    msg1 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=conv_id,
+        sender="User",
+        content="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+    )
+    msg2 = AIChatMessage(
+        id=uuid4(),
+        conversation_id=conv_id,
+        sender="Copilot",
+        content="### 💻 Host Security Records: `SHETTY` (`b7210744-d5cc-4563-ad2f-5b0d4d6be586`)",
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_revoked
+            m.scalars.return_value.all.return_value = [agent_revoked]
+            m.scalar_one_or_none.return_value = agent_revoked
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    # Explicit switch to 722abbe4... in current message
+    res = await service.interpret_and_execute_query(
+        "Switch to agent 722abbe4-7715-41a0-8d16-5334bb378cff",
+        history=[msg1, msg2],
+    )
+
+    assert "Endpoint Resolution Required" not in res["response_markdown"]
+    assert "Host Security Records: `SHETTY` (`722abbe4-7715-41a0-8d16-5334bb378cff`)" in res["response_markdown"]
+    assert "b7210744-d5cc-4563-ad2f-5b0d4d6be586" not in res["response_markdown"]
+    assert "`Revoked`" in res["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_ambiguous_endpoints_without_selection_prompts_disambiguation():
+    """Requirement 8.4: Multiple matching endpoints without selection prompts disambiguation, never arbitrarily picking first."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    agent_a = EndpointAgent(
+        id=UUID("7076bed3-10cf-470e-9ed6-044c294287c6"),
+        agent_id="722abbe4-7715-41a0-8d16-5334bb378cff",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Revoked",
+        last_seen=datetime.now(timezone.utc),
+    )
+    agent_b = EndpointAgent(
+        id=UUID("3e70f0fb-8699-4da1-ad35-f19648a84eb7"),
+        agent_id="b7210744-d5cc-4563-ad2f-5b0d4d6be586",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Online",
+        last_seen=datetime.now(timezone.utc),
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.all.return_value = [agent_a, agent_b]
+            m.scalars.return_value.first.return_value = agent_a
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query("Check security events on host SHETTY")
+
+    assert "Endpoint Resolution Required" in res["response_markdown"]
+    assert "Multiple enrolled endpoints match hostname 'SHETTY'" in res["response_markdown"]
+    assert "722abbe4-7715-41a0-8d16-5334bb378cff" in res["response_markdown"]
+    assert "b7210744-d5cc-4563-ad2f-5b0d4d6be586" in res["response_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_regression_revoked_endpoint_reported_accurately():
+    """Requirement 8.5: Revoked endpoint status is reported accurately without assuming online heartbeat."""
+    mock_session = AsyncMock()
+    service = AICopilotService(mock_session)
+
+    revoked_seen = datetime(2026, 9, 21, 13, 50, 0, tzinfo=timezone.utc)
+    agent_revoked = EndpointAgent(
+        id=UUID("7076bed3-10cf-470e-9ed6-044c294287c6"),
+        agent_id="722abbe4-7715-41a0-8d16-5334bb378cff",
+        hostname="SHETTY",
+        platform="Windows",
+        status="Revoked",
+        last_seen=revoked_seen,
+    )
+
+    def mock_query(stmt):
+        s_str = str(stmt).lower()
+        m = MagicMock()
+        if "endpoint_agents" in s_str:
+            m.scalars.return_value.first.return_value = agent_revoked
+            m.scalars.return_value.all.return_value = [agent_revoked]
+            m.scalar_one_or_none.return_value = agent_revoked
+        else:
+            m.scalars.return_value.first.return_value = None
+            m.scalars.return_value.all.return_value = []
+            m.scalar_one_or_none.return_value = None
+        return m
+
+    mock_session.execute = AsyncMock(side_effect=mock_query)
+
+    res = await service.interpret_and_execute_query("722abbe4-7715-41a0-8d16-5334bb378cff")
+
+    assert "Host Security Records: `SHETTY` (`722abbe4-7715-41a0-8d16-5334bb378cff`)" in res["response_markdown"]
+    assert "- **Agent Status:** `Revoked`" in res["response_markdown"]
+    assert "Revoked by Administrator" in res["response_markdown"]
+    assert "2026-09-21T13:50:00+00:00" in res["response_markdown"]
+    # Ensure it is never claimed as active online or isolated
+    assert "Active (Not Disabled)" not in res["response_markdown"]
+
+
+
 

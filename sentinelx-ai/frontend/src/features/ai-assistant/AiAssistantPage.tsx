@@ -45,6 +45,12 @@ export default function AiAssistantPage() {
 
   // State
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const activeConversationIdRef = useRef<string | null>(null);
+
+  const updateActiveConversationId = (id: string | null) => {
+    activeConversationIdRef.current = id;
+    setActiveConversationId(id);
+  };
   const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -93,12 +99,14 @@ export default function AiAssistantPage() {
 
   // Mutations
   const chatMutation = useMutation({
-    mutationFn: (msg: string) => sendCopilotChat(msg, activeConversationId || undefined),
+    mutationFn: (variables: { message: string; conversationId?: string }) =>
+      sendCopilotChat(variables.message, variables.conversationId),
     onSuccess: (newMsg: AIChatMessage) => {
+      const currentConvId = activeConversationIdRef.current || activeConversationId;
       if (!newMsg || !newMsg.content) {
         const emptyMsg: AIChatMessage = {
           id: `empty-${Date.now()}`,
-          conversation_id: activeConversationId || "",
+          conversation_id: currentConvId || "",
           sender: "Copilot",
           content: "⚠️ **No Response Content Returned:** The SentinelX AI service did not return message content. Please try rephrasing your inquiry.",
           evidence: {
@@ -111,8 +119,8 @@ export default function AiAssistantPage() {
         return;
       }
 
-      if (!activeConversationId && newMsg.conversation_id) {
-        setActiveConversationId(newMsg.conversation_id);
+      if (newMsg.conversation_id && currentConvId !== newMsg.conversation_id) {
+        updateActiveConversationId(newMsg.conversation_id);
       }
       setMessages((prev) => {
         if (prev.some((m) => m.id === newMsg.id)) return prev;
@@ -123,7 +131,7 @@ export default function AiAssistantPage() {
         queryClient.invalidateQueries({ queryKey: ["ai-conversation", newMsg.conversation_id] });
       }
     },
-    onError: (err: any, failedQuery: string) => {
+    onError: (err: any, vars: { message: string; conversationId?: string }) => {
       let errorDetail = "Unable to connect to the SentinelX backend. Please verify your connection or try again.";
       if (err?.response?.status === 401) {
         errorDetail = "Authentication failed. Your session may have expired. Please re-authenticate.";
@@ -145,13 +153,13 @@ export default function AiAssistantPage() {
 
       const errorMsg: AIChatMessage = {
         id: `err-${Date.now()}`,
-        conversation_id: activeConversationId || "",
+        conversation_id: activeConversationIdRef.current || activeConversationId || "",
         sender: "Copilot",
         content: `⚠️ **Query Execution Failed**\n\n${errorDetail}`,
         evidence: {
           insufficient_evidence_warning: errorDetail,
           is_error: true,
-          failed_query: failedQuery,
+          failed_query: vars?.message,
         },
         confidence_score: 0,
         created_at: new Date().toISOString(),
@@ -164,7 +172,7 @@ export default function AiAssistantPage() {
   const newChatMutation = useMutation({
     mutationFn: (title?: string) => createAIConversation(title || "New Security Chat"),
     onSuccess: (newConv: AIChatConversation) => {
-      setActiveConversationId(newConv.id);
+      updateActiveConversationId(newConv.id);
       setMessages([]);
       queryClient.invalidateQueries({ queryKey: ["ai-conversations"] });
     },
@@ -173,8 +181,8 @@ export default function AiAssistantPage() {
   const deleteChatMutation = useMutation({
     mutationFn: (id: string) => deleteAIConversation(id),
     onSuccess: (_, deletedId) => {
-      if (activeConversationId === deletedId) {
-        setActiveConversationId(null);
+      if ((activeConversationIdRef.current || activeConversationId) === deletedId) {
+        updateActiveConversationId(null);
         setMessages([]);
       }
       queryClient.invalidateQueries({ queryKey: ["ai-conversations"] });
@@ -216,10 +224,12 @@ export default function AiAssistantPage() {
     const query = textToSend || input;
     if (!query.trim() || chatMutation.isPending) return;
 
+    const convId = activeConversationIdRef.current || activeConversationId || undefined;
+
     // Optimistically show user message
     const tempUserMsg: AIChatMessage = {
       id: `temp-${Date.now()}`,
-      conversation_id: activeConversationId || "",
+      conversation_id: convId || "",
       sender: "User",
       content: query,
       evidence: {},
@@ -229,7 +239,7 @@ export default function AiAssistantPage() {
 
     setMessages((prev) => [...prev, tempUserMsg]);
     if (!textToSend) setInput("");
-    chatMutation.mutate(query);
+    chatMutation.mutate({ message: query, conversationId: convId });
   };
 
   const toggleEvidence = (msgId: string) => {
@@ -299,7 +309,7 @@ export default function AiAssistantPage() {
               convData.items.map((c) => (
                 <div
                   key={c.id}
-                  onClick={() => setActiveConversationId(c.id)}
+                  onClick={() => updateActiveConversationId(c.id)}
                   className={`group flex items-center justify-between p-2 rounded-xl cursor-pointer transition-all ${
                     activeConversationId === c.id
                       ? "bg-[var(--color-secondary-500)]/15 border border-[var(--color-secondary-500)]/40 text-[var(--color-text-primary)] font-semibold"
