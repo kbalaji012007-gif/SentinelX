@@ -82,14 +82,68 @@ export interface InvestigationListResponse {
   items: InvestigationResponse[];
 }
 
+export interface SuggestedAction {
+  action_type: string;
+  target: string;
+  parameters: Record<string, any>;
+  description: string;
+  expected_impact: string;
+  requires_confirmation: boolean;
+  supports_dry_run: boolean;
+  rollback_available: boolean;
+}
+
+export interface AIChatEvidence {
+  observed_sentinelx_data?: string[];
+  external_intelligence?: string[];
+  ai_inference?: string[];
+  insufficient_evidence_warning?: string | null;
+  suggested_actions?: SuggestedAction[];
+  tool_used?: string;
+  [key: string]: any;
+}
+
 export interface AIChatMessage {
   id: string;
   conversation_id: string;
   sender: "User" | "Copilot";
   content: string;
-  evidence: Record<string, any>;
+  evidence: AIChatEvidence;
   confidence_score: number;
   created_at: string;
+}
+
+export interface AIChatConversation {
+  id: string;
+  title: string;
+  created_at: string;
+  messages: AIChatMessage[];
+}
+
+export interface ConversationListResponse {
+  total: number;
+  items: AIChatConversation[];
+}
+
+export interface SafeActionExecuteRequest {
+  action_type: string;
+  target: string;
+  parameters?: Record<string, any>;
+  is_dry_run?: boolean;
+  confirmed?: boolean;
+}
+
+export interface SafeActionExecuteResponse {
+  success: boolean;
+  status: string;
+  action_type: string;
+  target: string;
+  is_dry_run: boolean;
+  output: Record<string, any>;
+  rollback_data: Record<string, any>;
+  executed_by: string;
+  executed_at: string;
+  error?: string | null;
 }
 
 export interface AIExplainResponse {
@@ -117,6 +171,32 @@ export async function sendCopilotChat(message: string, conversationId?: string):
     message,
     conversation_id: conversationId,
   });
+  return data;
+}
+
+export async function fetchAIConversations(page = 1, pageSize = 20): Promise<ConversationListResponse> {
+  const { data } = await apiClient.get<ConversationListResponse>("/ai/conversations", {
+    params: { page, page_size: pageSize },
+  });
+  return data;
+}
+
+export async function fetchAIConversation(id: string): Promise<AIChatConversation> {
+  const { data } = await apiClient.get<AIChatConversation>(`/ai/conversations/${id}`);
+  return data;
+}
+
+export async function createAIConversation(title = "New Security Chat"): Promise<AIChatConversation> {
+  const { data } = await apiClient.post<AIChatConversation>("/ai/conversations", { title });
+  return data;
+}
+
+export async function deleteAIConversation(id: string): Promise<void> {
+  await apiClient.delete(`/ai/conversations/${id}`);
+}
+
+export async function executeSafeResponseAction(payload: SafeActionExecuteRequest): Promise<SafeActionExecuteResponse> {
+  const { data } = await apiClient.post<SafeActionExecuteResponse>("/ai/action/execute", payload);
   return data;
 }
 

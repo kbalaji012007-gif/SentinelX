@@ -26,6 +26,14 @@ class EvidenceSources(BaseModel):
     insufficient_evidence_warning: str | None = None
 
 
+class MitreMapping(BaseModel):
+    """MITRE ATT&CK technique mapping."""
+    technique_id: str
+    technique_name: str
+    tactic: str
+    explanation: str | None = None
+
+
 class InvestigationResponse(BaseModel):
     """Detailed AI investigation report."""
 

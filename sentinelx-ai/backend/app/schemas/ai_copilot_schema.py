@@ -1,6 +1,7 @@
 """
 SentinelX AI – AI Copilot Pydantic v2 Schemas
-Validation and serialization schemas for Copilot Chat, Explainability, and Multi-Format Report Generation.
+Validation and serialization schemas for Copilot Chat, Explainability,
+Multi-Format Report Generation, Conversation Management, and Safe SOAR Actions.
 """
 
 from uuid import UUID
@@ -29,6 +30,12 @@ class AIChatMessageResponse(BaseModel):
     evidence: dict[str, Any] = Field(default_factory=dict)
     confidence_score: int = 90
     created_at: datetime
+
+
+class AIChatConversationCreate(BaseModel):
+    """Payload to create a new chat conversation."""
+
+    title: str = Field(default="New Security Chat", description="Conversation title")
 
 
 class AIChatConversationResponse(BaseModel):
@@ -86,3 +93,28 @@ class AIReportResponse(BaseModel):
     json_content: dict[str, Any] = Field(default_factory=dict)
     created_by: str
     created_at: datetime | None = None
+
+
+class SafeActionExecuteRequest(BaseModel):
+    """Payload for executing a recommended response action with authorization confirmation."""
+
+    action_type: str = Field(..., description="Action type: Block_IP, Isolate_Host, Disable_User, etc.")
+    target: str = Field(..., description="Target value: IP address, hostname, username, or identifier")
+    parameters: dict[str, Any] = Field(default_factory=dict, description="Action parameters")
+    is_dry_run: bool = Field(default=False, description="Dry-run simulation mode")
+    confirmed: bool = Field(default=False, description="Explicit authorization confirmation for real execution")
+
+
+class SafeActionExecuteResponse(BaseModel):
+    """Result of safe response action execution."""
+
+    success: bool
+    status: str
+    action_type: str
+    target: str
+    is_dry_run: bool
+    output: dict[str, Any] = Field(default_factory=dict)
+    rollback_data: dict[str, Any] = Field(default_factory=dict)
+    executed_by: str
+    executed_at: str
+    error: str | None = None
