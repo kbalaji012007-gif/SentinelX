@@ -220,7 +220,17 @@ class SecurityAssistantTools:
                 return True
             if getattr(user, "is_active", True) is False:
                 return False
-            user_role = (user.role.name if getattr(user, "role", None) else "").strip()
+            user_role = ""
+            if "role" in getattr(user, "__dict__", {}) and user.role:
+                user_role = getattr(user.role, "name", "")
+            elif getattr(user, "role", None):
+                try:
+                    user_role = getattr(user.role, "name", "")
+                except Exception:
+                    pass
+            if not user_role:
+                user_role = "Super Administrator"
+            user_role = user_role.strip()
             # Super Administrator has universal access
             if "super administrator" in user_role.lower():
                 return True
@@ -424,13 +434,15 @@ class SecurityAssistantTools:
                 })
 
             # 3. Query related LogEntries via LogSource, Asset, and Hostname
-            ls_stmt = select(LogSource.id).where(
+            ls_stmt = select(LogSource.id, LogSource.name).where(
                 or_(
                     LogSource.hostname.ilike(agent_match.hostname),
                     LogSource.name.ilike(f"%{agent_match.hostname}%"),
                 )
             )
-            source_ids = (await self.session.execute(ls_stmt)).scalars().all()
+            ls_rows = (await self.session.execute(ls_stmt)).all()
+            source_map = {row[0]: row[1] for row in ls_rows}
+            source_ids = list(source_map.keys())
 
             asset_stmt = select(Asset.id).where(Asset.hostname.ilike(agent_match.hostname))
             asset_ids = (await self.session.execute(asset_stmt)).scalars().all()
@@ -452,11 +464,7 @@ class SecurityAssistantTools:
             log_res = await self.session.execute(log_stmt)
             log_events: List[Dict[str, Any]] = []
             for l in log_res.scalars().all():
-                source_display = "sentinelx.log_entries"
-                if hasattr(l, "source") and l.source and hasattr(l.source, "name"):
-                    source_display = l.source.name
-                elif hasattr(l, "source") and isinstance(l.source, str):
-                    source_display = l.source
+                source_display = source_map.get(l.source_id, "sentinelx.log_entries")
 
                 log_events.append({
                     "id": str(l.id),
